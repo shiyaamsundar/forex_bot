@@ -17,7 +17,7 @@ OANDA_API_KEY = '816bb6859c55c695017b323717644166-261bfdb5340bf2254dea6ff908474f
 OANDA_ACCOUNT_ID = '101-001-31847433-001'
 OANDA_URL = 'https://api-fxpractice.oanda.com/v3'  # use api-fxtrade.oanda.com for live
 TELEGRAM_BOT_TOKEN = '8138331040:AAH_1S50R0_fHGbedJExuzIizoQ6I6fr5iw'
-TELEGRAM_CHAT_ID = 'YOUR_CHAT_ID'  # Replace with your Telegram chat ID
+TELEGRAM_CHAT_ID = '949924514'  # Replace with your Telegram chat ID
 
 HEADERS = {
     'Authorization': f'Bearer {OANDA_API_KEY}'
@@ -207,7 +207,7 @@ def main():
     "BCO_USD"     # Brent Crude
     ]
 
-    timeframes = ["M1", "M5", "M30", "H1", "H4"]
+    timeframes = ["M1","M15", "M5", "M30", "H1", "H4"]
     
     # Start monitoring threads for each instrument
     threads = []
