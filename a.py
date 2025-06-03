@@ -73,7 +73,7 @@ def test_telegram_bot():
     """Send a test message to verify Telegram bot functionality"""
     # Get chat ID first
     chat_id = get_chat_id()
-    print(chat_id,'ppp')
+    #print(chat_id,'ppp')
     if not chat_id:
         logger.error("Could not get chat ID. Please make sure you've sent a message to your bot.")
         return
@@ -221,7 +221,7 @@ def main():
     logger.info("Server alive checker started")
     
     # Test Telegram bot first
-    test_telegram_bot()
+    #test_telegram_bot()
     
     # List of instruments to monitor
     instruments = [
