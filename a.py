@@ -116,30 +116,27 @@ def get_candles(instrument="EUR_GBP", timeframe="H1", count=2):
 def is_bullish_engulfing(prev, curr):
     """
     Bullish Engulfing:
-    - Previous candle is bearish (close < open)
-    - Current candle is bullish (close > open)
-    - Current candle's body engulfs previous candle's body
+    - Current bar open is less than or equal to previous bar close
+    - Current bar open is less than previous bar open
+    - Current bar close is greater than previous bar open
     """
     return (
-        prev['close'] < prev['open'] and      # prev bearish
-        curr['close'] > curr['open'] and      # curr bullish
-        curr['open'] <= prev['close'] and     # engulfing start
-        curr['close'] >= prev['open']         # engulfing end
+        curr['open'] <= prev['close'] and     # Current open <= Previous close
+        curr['open'] < prev['open'] and       # Current open < Previous open
+        curr['close'] > prev['open']          # Current close > Previous open
     )
-
 
 def is_bearish_engulfing(prev, curr):
     """
     Bearish Engulfing:
-    - Previous candle is bullish (close > open)
-    - Current candle is bearish (close < open)
-    - Current candle's body engulfs previous candle's body
+    - Current bar open is greater than or equal to previous bar close
+    - Current bar open is greater than previous bar open
+    - Current bar close is less than previous bar open
     """
     return (
-        prev['close'] > prev['open'] and      # prev bullish
-        curr['close'] < curr['open'] and      # curr bearish
-        curr['open'] >= prev['close'] and     # engulfing start
-        curr['close'] <= prev['open']         # engulfing end
+        curr['open'] >= prev['close'] and     # Current open >= Previous close
+        curr['open'] > prev['open'] and       # Current open > Previous open
+        curr['close'] < prev['open']          # Current close < Previous open
     )
     
 def check_engulfing(instrument="EUR_GBP", timeframe="1M"):
