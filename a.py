@@ -21,7 +21,7 @@ OANDA_API_KEY = '816bb6859c55c695017b323717644166-261bfdb5340bf2254dea6ff908474f
 OANDA_ACCOUNT_ID = '101-001-31847433-001'
 OANDA_URL = 'https://api-fxpractice.oanda.com/v3'  # use api-fxtrade.oanda.com for live
 TELEGRAM_BOT_TOKEN = '8138331040:AAH_1S50R0_fHGbedJExuzIizoQ6I6fr5iw'
-TELEGRAM_CHAT_ID = '949924514'  # Replace with your Telegram chat ID
+TELEGRAM_CHAT_ID = '1002403985994'  # Replace with your Telegram chat ID
 
 HEADERS = {
     'Authorization': f'Bearer {OANDA_API_KEY}'
@@ -94,6 +94,7 @@ def get_candles(instrument="EUR_GBP", timeframe="H1", count=2):
         response = requests.get(url, headers=HEADERS, params=params)
         response.raise_for_status()
         data = response.json()
+        #print(data)
         candles = data["candles"]
         return [{
             "open": float(c["mid"]["o"]),
