@@ -5,6 +5,11 @@ import logging
 from datetime import datetime
 import threading
 from flask import Flask, jsonify
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -16,12 +21,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Configuration
-OANDA_API_KEY = '816bb6859c55c695017b323717644166-261bfdb5340bf2254dea6ff908474fd5'
-OANDA_ACCOUNT_ID = '101-001-31847433-001'
-OANDA_URL = 'https://api-fxpractice.oanda.com/v3'  # use api-fxtrade.oanda.com for live
-TELEGRAM_BOT_TOKEN = '8138331040:AAH_1S50R0_fHGbedJExuzIizoQ6I6fr5iw'
-TELEGRAM_CHAT_ID = '1002403985994'  # Replace with your Telegram chat ID
+# Configuration from environment variables
+OANDA_API_KEY = os.getenv('OANDA_API_KEY')
+OANDA_ACCOUNT_ID = os.getenv('OANDA_ACCOUNT_ID')
+OANDA_URL = os.getenv('OANDA_URL')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 HEADERS = {
     'Authorization': f'Bearer {OANDA_API_KEY}'
@@ -68,6 +73,7 @@ def test_telegram_bot():
     """Send a test message to verify Telegram bot functionality"""
     # Get chat ID first
     chat_id = get_chat_id()
+    print(chat_id,'ppp')
     if not chat_id:
         logger.error("Could not get chat ID. Please make sure you've sent a message to your bot.")
         return
@@ -215,7 +221,7 @@ def main():
     logger.info("Server alive checker started")
     
     # Test Telegram bot first
-    #test_telegram_bot()
+    test_telegram_bot()
     
     # List of instruments to monitor
     instruments = [
