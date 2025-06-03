@@ -241,7 +241,7 @@ def main():
     # Keep the main thread alive
     try:
         while True:
-            time.sleep(1)
+            time.sleep(60)  # Check every minute
             print(f"Bot is alive - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     except KeyboardInterrupt:
         logger.info("Monitoring stopped by user")
