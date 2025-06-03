@@ -242,6 +242,7 @@ def main():
     try:
         while True:
             time.sleep(1)
+            print(f"Bot is alive - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     except KeyboardInterrupt:
         logger.info("Monitoring stopped by user")
 
