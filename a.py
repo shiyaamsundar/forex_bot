@@ -4,6 +4,10 @@ import json
 import logging
 from datetime import datetime
 import threading
+from flask import Flask, jsonify
+
+# Initialize Flask app
+app = Flask(__name__)
 
 # Configure logging
 logging.basicConfig(
@@ -176,8 +180,21 @@ def monitor_instrument(instrument, timeframes):
             logger.error(f"Error in monitoring loop: {str(e)}")
             time.sleep(60)  # Wait before retrying
 
+@app.route('/')
+def home():
+    return jsonify({"status": "alive", "message": "Forex Bot is running"})
+
+def run_flask():
+    """Run the Flask server"""
+    app.run(host='0.0.0.0', port=10000)
+
 def main():
     """Main function to start monitoring"""
+    # Start Flask server in a separate thread
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    logger.info("Flask server started")
+    
     # Test Telegram bot first
     #test_telegram_bot()
     
