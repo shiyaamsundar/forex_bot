@@ -189,12 +189,30 @@ def run_flask():
     """Run the Flask server"""
     app.run(host='0.0.0.0', port=10000)
 
+def keep_server_alive():
+    """Make periodic API calls to keep the server alive"""
+    while True:
+        try:
+            response = requests.get('https://forex-bot-5o8q.onrender.com')
+            if response.status_code == 200:
+                logger.info(f"Server alive check successful - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            else:
+                logger.error(f"Server alive check failed with status code: {response.status_code}")
+        except Exception as e:
+            logger.error(f"Error keeping server alive: {str(e)}")
+        time.sleep(60)  # Check every minute
+
 def main():
     """Main function to start monitoring"""
     # Start Flask server in a separate thread
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
     logger.info("Flask server started")
+    
+    # Start server alive checker in a separate thread
+    alive_thread = threading.Thread(target=keep_server_alive, daemon=True)
+    alive_thread.start()
+    logger.info("Server alive checker started")
     
     # Test Telegram bot first
     #test_telegram_bot()
