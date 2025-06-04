@@ -291,7 +291,8 @@ def main():
         "WTICO_USD", "BCO_USD"
     ]
 
-    timeframes = ["M1", "M5", "M15", "M30", "H1", "H4", "D", "W", "M"]
+    #timeframes = ["M1", "M5", "M15", "M30", "H1", "H4", "D", "W", "M"]
+    timeframes = ["M30"]
 
     threads = []
     for instrument in instruments:
