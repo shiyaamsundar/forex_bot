@@ -35,6 +35,10 @@ HEADERS = {
 def send_telegram_alert(message):
     """Send alert to Telegram channel"""
     try:
+        if not message or not message.strip():
+            logger.error("Cannot send empty message to Telegram")
+            return
+            
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         payload = {
             "chat_id": TELEGRAM_CHAT_ID,
@@ -45,8 +49,13 @@ def send_telegram_alert(message):
         response = requests.post(url, json=payload)
         response.raise_for_status()
         logger.info(f"Telegram alert sent: {message}")
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         logger.error(f"Failed to send Telegram alert: {str(e)}")
+        if hasattr(e.response, 'json'):
+            error_data = e.response.json()
+            logger.error(f"Telegram API error: {error_data}")
+    except Exception as e:
+        logger.error(f"Unexpected error sending Telegram alert: {str(e)}")
 
 def get_chat_id():
     """Get the chat ID from the bot's updates"""
