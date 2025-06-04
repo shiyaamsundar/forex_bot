@@ -244,11 +244,11 @@ def monitor_instrument(instrument, timeframes):
                     #logger.info(signal)
                     pass
                 time.sleep(1)  # Small delay to avoid hitting rate limits
-            print(f"Waiting 20 minutes before next check for {instrument} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            time.sleep(1200)  # 20 minutes = 1200 seconds
+            print(f"Waiting 15 minutes before next check for {instrument} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            time.sleep(900)  # 15 minutes = 900 seconds
         except Exception as e:
             #logger.error(f"Error in monitoring loop: {str(e)}")
-            time.sleep(1200)  # Wait 20 minutes before retrying
+            time.sleep(900)  # Wait 15 minutes before retrying
 
 @app.route('/')
 def home():
