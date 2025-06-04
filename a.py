@@ -227,7 +227,7 @@ def main():
     logger.info("Server alive checker started")
     
     # Test Telegram bot first
-    #test_telegram_bot()
+    test_telegram_bot()
     
     # List of instruments to monitor
     instruments = [
