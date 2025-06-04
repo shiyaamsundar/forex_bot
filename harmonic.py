@@ -3,9 +3,7 @@ import time
 import pandas as pd
 
 # === Configurations ===
-TELEGRAM_TOKEN = "789456123:AAH675432109876543210"
-CHAT_ID = "1002403985994"
-API_KEY = "afee40a90c974095b103aeb8f32442e9"
+
 
 
 # Your list of NSE stocks (use .NSE suffix)

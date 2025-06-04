@@ -141,65 +141,65 @@ def is_bearish_engulfing(prev, curr):
 def check_cpr_engulfing(instrument, timeframe):
     """
     Check engulfing pattern near CPR lines (TC or BC) and send combined alert.
+    Returns True if pattern is found and alert is sent, False otherwise.
     """
     try:
-        # Get previous day's candles (daily timeframe) to calculate CPR
-        # You might want to adjust timeframe or candle index depending on your data
-        daily_candles = get_candles(instrument, "D", count=2)
-        if len(daily_candles) < 2:
-            return None
-        
-        prev_day = daily_candles[-2]
-        cpr = calculate_cpr(prev_day['high'], prev_day['low'], prev_day['close'])
-        TC, BC = cpr['TC'], cpr['BC']
+        # Get more candles to ensure we have enough data for CPR calculation
+        candles = get_candles(instrument, timeframe, count=10)
+        if len(candles) < 10:
+            print(f"Not enough candles for CPR calculation on {instrument} {timeframe}")
+            return False
 
-        # Get candles for the timeframe to check engulfing
-        candles = get_candles(instrument, timeframe, count=2)
-        if len(candles) < 2:
-            return None
+        # Calculate CPR levels
+        high = max(candle["high"] for candle in candles)
+        low = min(candle["low"] for candle in candles)
+        close = candles[-1]["close"]
         
+        # Calculate CPR levels
+        pivot = (high + low + close) / 3
+        bc = (high + low) / 2
+        tc = (pivot - bc) + pivot
+
+        # Get the last two candles for engulfing check
         prev, curr = candles[-2], candles[-1]
-
-        # Define a threshold (e.g. price within 0.1% of TC or BC) to consider "near"
-        threshold = 0.001  # 0.1%
-
-        near_top = abs(curr['close'] - TC) / TC <= threshold
-        near_bottom = abs(curr['close'] - BC) / BC <= threshold
-
-        message = None
-        # Check bullish engulfing near bottom line
-        if is_bullish_engulfing(prev, curr) and near_bottom:
-            message = (
-                f"🚀 <b>BULLISH Engulfing near CPR Bottom (BC)</b>\n"
-                f"Pair: {instrument}\n"
-                f"Timeframe: {timeframe}\n"
-                f"CPR BC: {BC:.5f}\n"
-                f"Open: {curr['open']:.5f}\n"
-                f"Close: {curr['close']:.5f}\n"
-                f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            )
         
-        # Check bearish engulfing near top line
-        elif is_bearish_engulfing(prev, curr) and near_top:
-            message = (
-                f"🔻 <b>BEARISH Engulfing near CPR Top (TC)</b>\n"
-                f"Pair: {instrument}\n"
-                f"Timeframe: {timeframe}\n"
-                f"CPR TC: {TC:.5f}\n"
-                f"Open: {curr['open']:.5f}\n"
-                f"Close: {curr['close']:.5f}\n"
-                f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            )
-
-        if message:
-            send_telegram_alert(message)
-            return message
+        # Define proximity threshold (0.1% of the price range)
+        threshold = (high - low) * 0.001
         
-        return None
+        # Check if price is near CPR levels
+        near_tc = abs(curr["close"] - tc) <= threshold
+        near_bc = abs(curr["close"] - bc) <= threshold
+        
+        if not (near_tc or near_bc):
+            return False
+
+        # Check for engulfing patterns
+        is_bullish = is_bullish_engulfing(prev, curr)
+        is_bearish = is_bearish_engulfing(prev, curr)
+        
+        if not (is_bullish or is_bearish):
+            return False
+
+        # Prepare the alert message
+        pattern_type = "BULLISH" if is_bullish else "BEARISH"
+        level_type = "TC" if near_tc else "BC"
+        emoji = "🚀" if is_bullish else "🔻"
+        
+        message = f"{emoji} <b>{pattern_type} Engulfing near {level_type}</b>\n\n" \
+                 f"Pair: {instrument}\n" \
+                 f"Timeframe: {timeframe}\n" \
+                 f"Open: {curr['open']:.5f}\n" \
+                 f"Close: {curr['close']:.5f}\n" \
+                 f"CPR {level_type}: {tc if near_tc else bc:.5f}\n" \
+                 f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        
+        print(f"CPR Engulfing detected for {instrument} on {timeframe}")
+        send_telegram_alert(message)
+        return True
 
     except Exception as e:
-        #logger.error(f"Error in alert_cpr_engulfing: {str(e)}")
-        return None
+        print(f"Error in check_cpr_engulfing for {instrument} {timeframe}: {str(e)}")
+        return False
 
 
 def check_engulfing(instrument="EUR_GBP", timeframe="M1"):
@@ -234,6 +234,7 @@ def check_engulfing(instrument="EUR_GBP", timeframe="M1"):
         return None
 
 def monitor_instrument(instrument, timeframes):
+    """Continuously monitor an instrument for patterns"""
     while True:
         try:
             for tf in timeframes:
@@ -243,10 +244,11 @@ def monitor_instrument(instrument, timeframes):
                     #logger.info(signal)
                     pass
                 time.sleep(1)  # Small delay to avoid hitting rate limits
-            time.sleep(60)
+            print(f"Waiting 20 minutes before next check for {instrument} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            time.sleep(1200)  # 20 minutes = 1200 seconds
         except Exception as e:
             #logger.error(f"Error in monitoring loop: {str(e)}")
-            time.sleep(60)
+            time.sleep(1200)  # Wait 20 minutes before retrying
 
 @app.route('/')
 def home():
