@@ -80,6 +80,7 @@ def get_chat_id():
 
 def test_telegram_bot():
     chat_id = get_chat_id()
+    print(chat_id,'chat_id')
     if not chat_id:
         #logger.error("Could not get chat ID. Please make sure you've sent a message to your bot.")
         return
@@ -250,10 +251,11 @@ def monitor_instrument(instrument, timeframes):
                     pass
                 time.sleep(1)  # Small delay to avoid hitting rate limits
             print(f"Waiting 25 minutes before next check for {instrument} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            time.sleep(900)  # 15 minutes = 900 seconds
+            time.sleep(1500)  # 25 minutes = 1500 seconds
         except Exception as e:
             #logger.error(f"Error in monitoring loop: {str(e)}")
-            time.sleep(1500)  # Wait 25 minutes before retrying
+            print(f"Error occurred, retrying in 5 minutes - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            time.sleep(300)  # Wait 5 minutes before retrying
 
 @app.route('/')
 def home():
@@ -298,7 +300,6 @@ def main():
         "WTICO_USD", "BCO_USD"
     ]
 
-    #timeframes = ["M1", "M5", "M15", "M30", "H1", "H4", "D", "W", "M"]
     timeframes = ["M30"]
 
     threads = []
@@ -314,7 +315,7 @@ def main():
 
     try:
         while True:
-            time.sleep(60)
+            time.sleep(1500)  # Check every 25 minutes
             print(f"Bot is alive - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     except KeyboardInterrupt:
         #logger.info("Monitoring stopped by user")
@@ -322,3 +323,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    test_telegram_bot()
