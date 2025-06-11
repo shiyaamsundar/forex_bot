@@ -41,7 +41,7 @@ def apply_filter(df):
     df["EPS"] = 12
     df["PB Ratio"] = 3
     return df[
-        (df["Company PE"] > df["Industry PE"]) &
+        (df["Company PE"] < df["Industry PE"]) &
         (df["ROE"].between(10, 15)) &
         (df["EPS"].between(10, 15)) &
         (df["PB Ratio"].between(1, 5))
