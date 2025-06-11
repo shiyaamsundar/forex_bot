@@ -239,10 +239,27 @@ def check_engulfing(instrument="EUR_GBP", timeframe="M1"):
         #logger.error(f"Error checking engulfing pattern: {str(e)}")
         return None
 
+def get_next_interval():
+    """Calculate seconds until next 30-minute interval"""
+    now = datetime.now()
+    # Calculate minutes until next 30-minute mark
+    minutes_until_next = 30 - (now.minute % 30)
+    # If we're at a 30-minute mark, wait for the next hour
+    if minutes_until_next == 30:
+        minutes_until_next = 0
+    # Add seconds
+    seconds_until_next = minutes_until_next * 60
+    return seconds_until_next
+
 def monitor_instrument(instrument, timeframes):
     """Continuously monitor an instrument for patterns"""
     while True:
         try:
+            # Wait until next 30-minute interval
+            wait_seconds = get_next_interval()
+            print(f"Waiting {wait_seconds//60} minutes until next check for {instrument} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            time.sleep(wait_seconds)
+            
             for tf in timeframes:
                 signal = check_engulfing(instrument, tf)
                 cpr_signal = check_cpr_engulfing(instrument, tf)
@@ -250,8 +267,7 @@ def monitor_instrument(instrument, timeframes):
                     #logger.info(signal)
                     pass
                 time.sleep(1)  # Small delay to avoid hitting rate limits
-            print(f"Waiting 25 minutes before next check for {instrument} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            time.sleep(1500)  # 25 minutes = 1500 seconds
+            
         except Exception as e:
             #logger.error(f"Error in monitoring loop: {str(e)}")
             print(f"Error occurred, retrying in 5 minutes - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -315,7 +331,8 @@ def main():
 
     try:
         while True:
-            time.sleep(1500)  # Check every 25 minutes
+            wait_seconds = get_next_interval()
+            time.sleep(wait_seconds)
             print(f"Bot is alive - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     except KeyboardInterrupt:
         #logger.info("Monitoring stopped by user")
