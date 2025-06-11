@@ -31,13 +31,28 @@ TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 # Track sent alerts to prevent duplicates
 sent_alerts = {}
 ALERT_EXPIRY = 1800  # 30 minutes in seconds
+last_clear_time = time.time()
 
 HEADERS = {
     'Authorization': f'Bearer {OANDA_API_KEY}'
 }
 
+def clear_expired_alerts():
+    """Clear all expired alerts"""
+    global last_clear_time
+    current_time = time.time()
+    
+    # Only clear if 30 minutes have passed since last clear
+    if current_time - last_clear_time >= ALERT_EXPIRY:
+        sent_alerts.clear()
+        last_clear_time = current_time
+        print(f"Cleared all alerts at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
 def is_alert_sent(instrument, timeframe, pattern_type, level_type=None):
     """Check if an alert was recently sent"""
+    # Clear expired alerts first
+    clear_expired_alerts()
+    
     key = f"{instrument}_{timeframe}_{pattern_type}_{level_type if level_type else ''}"
     if key in sent_alerts:
         # Check if alert is still valid (within 30 minutes)
@@ -211,7 +226,7 @@ def check_cpr_engulfing(instrument, timeframe):
         else:
             return False  # Pattern not at the right CPR level
 
-        # Check if alert was recently sent
+        # Check if we've already sent this alert recently
         if is_alert_sent(instrument, timeframe, pattern_type, level_type):
             return False
 
@@ -242,7 +257,7 @@ def check_engulfing(instrument="EUR_GBP", timeframe="M1"):
         prev, curr = candles[-2], candles[-1]
 
         if is_bullish_engulfing(prev, curr):
-            # Check if alert was recently sent
+            # Check if we've already sent this alert recently
             if is_alert_sent(instrument, timeframe, "BULLISH"):
                 return None
                 
@@ -256,7 +271,7 @@ def check_engulfing(instrument="EUR_GBP", timeframe="M1"):
             mark_alert_sent(instrument, timeframe, "BULLISH")
             return message
         elif is_bearish_engulfing(prev, curr):
-            # Check if alert was recently sent
+            # Check if we've already sent this alert recently
             if is_alert_sent(instrument, timeframe, "BEARISH"):
                 return None
                 
@@ -294,6 +309,9 @@ def monitor_instrument(instrument, timeframes):
             wait_seconds = get_next_interval()
             print(f"Waiting {wait_seconds//60} minutes until next check for {instrument} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             time.sleep(wait_seconds)
+            
+            # Clear expired alerts at the start of each monitoring cycle
+            clear_expired_alerts()
             
             for tf in timeframes:
                 signal = check_engulfing(instrument, tf)
@@ -375,3 +393,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    test_telegram_bot()
