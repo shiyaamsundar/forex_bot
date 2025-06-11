@@ -1,102 +1,101 @@
-import datetime
-import requests
-import zipfile
-import io
-import pandas as pd
 import os
+import pandas as pd
+from telegram import Update, InputFile
+from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+import asyncio
+import sys
+from datetime import datetime
 
-# === Step 1: Download Bhavcopy for a Given Date ===
-def fetch_bhavcopy(date):
-    url = f"https://www1.nseindia.com/content/historical/EQUITIES/{date.strftime('%Y')}/{date.strftime('%b').upper()}/cm{date.strftime('%d%b%Y').upper()}bhav.csv.zip"
-    headers = {"User-Agent": "Mozilla/5.0"}
+# Create downloads folder if it doesn't exist
+os.makedirs("downloads", exist_ok=True)
+
+def get_timestamp():
+    """Get current timestamp for unique filenames"""
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+# Filtering logic
+def filter_stocks(df):
     try:
-        r = requests.get(url, headers=headers, timeout=10)
-        if r.status_code != 200:
-            return None
-        z = zipfile.ZipFile(io.BytesIO(r.content))
-        csv_name = z.namelist()[0]
-        df = pd.read_csv(z.open(csv_name))
-        df = df[['SYMBOL', 'OPEN', 'HIGH', 'LOW', 'CLOSE']].rename(columns=str.lower)
-        df['date'] = date
-        return df
+        df["Company PE"] = pd.to_numeric(df["Company PE"], errors="coerce")
+        df["Industry PE"] = pd.to_numeric(df["Industry PE"], errors="coerce")
+        df["ROE"] = pd.to_numeric(df["ROE"], errors="coerce")
+        df["EPS"] = pd.to_numeric(df["EPS"], errors="coerce")
+        df["PB Ratio"] = pd.to_numeric(df["PB Ratio"], errors="coerce")
+
+        return df[
+            (df["Company PE"] > df["Industry PE"]) &
+            (df["ROE"].between(10, 15)) &
+            (df["EPS"].between(10, 15)) &
+            (df["PB Ratio"].between(1, 5))
+        ]
     except Exception as e:
-        print(f"{date}: Failed to fetch Bhavcopy - {e}")
-        return None
+        print(f"Error in filtering: {e}")
+        return pd.DataFrame()
 
-# === Step 2: Get Last 5 Trading Days' Bhavcopies ===
-def get_last_n_bhavcopies(n=5):
-    today = datetime.date.today()
-    results = []
-    attempts = 0
+# Handler for uploaded Excel file
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    doc = update.message.document
 
-    while len(results) < n and attempts < 10:
-        if today.weekday() < 5:  # Skip weekends
-            df = fetch_bhavcopy(today)
-            if df is not None:
-                results.append(df)
-        today -= datetime.timedelta(days=1)
-        attempts += 1
-
-    if results:
-        return pd.concat(results, ignore_index=True)
-    return None
-
-# === Step 3: Screener Logic (Your 6 Conditions) ===
-def apply_weekly_screener(df):
-    df.columns = df.columns.str.lower()
-    df = df.sort_values(by=['symbol', 'date'])
-    results = []
-
-    for symbol, group in df.groupby('symbol'):
-        if len(group) < 5:
-            continue
-
-        group = group.tail(5).reset_index(drop=True)
-        today = group.iloc[-1]
-        yesterday = group.iloc[-2]
-
-        closes = group['close'].tolist()
-        opens = group['open'].tolist()
-
+    if doc.mime_type == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
         try:
-            c1 = today['close'] >= yesterday['high']
-            c2 = today['close'] > today['high'] * 0.75
-            c3 = max(closes) < today['close'] * 1.03
-            c4 = min(opens) > today['close'] * 0.95
-            c5 = min(closes) > today['close'] * 0.95
-            c6 = max(opens) < today['close'] * 1.03
+            # Download the file with timestamp to avoid conflicts
+            timestamp = get_timestamp()
+            input_file = f"downloads/input_{timestamp}.xlsx"
+            output_file = f"downloads/filtered_stocks_{timestamp}.xlsx"
+            
+            # Download the file
+            file = await context.bot.get_file(doc.file_id)
+            await file.download_to_drive(input_file)
+            
+            # Process the file
+            df = pd.read_excel(input_file)
+            filtered = filter_stocks(df)
 
-            results.append({
-                'symbol': symbol,
-                'C1': c1, 'C2': c2, 'C3': c3,
-                'C4': c4, 'C5': c5, 'C6': c6,
-                'PASS': all([c1, c2, c3, c4, c5, c6])
-            })
+            if filtered.empty:
+                await update.message.reply_text("No stocks matched the criteria.")
+            else:
+                # Save filtered results
+                filtered.to_excel(output_file, index=False)
+                
+                # Send the filtered file
+                await update.message.reply_text("Processing complete! Here are the filtered stocks:")
+                await update.message.reply_document(InputFile(output_file))
+                
+                # Clean up files
+                try:
+                    os.remove(input_file)
+                    os.remove(output_file)
+                except Exception as e:
+                    print(f"Error cleaning up files: {e}")
 
         except Exception as e:
-            print(f"{symbol}: Error in logic - {e}")
+            await update.message.reply_text(f"Error processing the file: {e}")
+    else:
+        await update.message.reply_text("Please send a valid Excel (.xlsx) file.")
 
-    return pd.DataFrame(results)
+def run_bot():
+    """Run the bot."""
+    # Create the Application
+    application = ApplicationBuilder().token("8040313941:AAFWcrp034rPZ4D87icX05z-_JeQZ2mMBa0").build()
 
-# === Step 4: Run Entire Process ===
-def run_screener():
-    print("📥 Downloading last 5 Bhavcopies...")
-    bhav_data = get_last_n_bhavcopies(5)
+    # Add handler
+    application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 
-    if bhav_data is None:
-        print("❌ Failed to get sufficient Bhavcopy data.")
-        return
+    print("Bot is running...")
+    print("Send any Excel file to process it...")
+    
+    # Run the bot until the user presses Ctrl-C
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
-    print("✅ Applying screener...")
-    results = apply_weekly_screener(bhav_data)
-
-    print("💾 Saving to 'nse_200_screener_results.xlsx'...")
-    results.to_excel("nse_200_screener_results.xlsx", index=False)
-
-    passed = results[results['PASS']]
-    print(f"\n🏆 {len(passed)} stocks passed the screener:")
-    print(passed[['symbol'] + [f'C{i}' for i in range(1,7)]])
-
-# === Run it ===
 if __name__ == "__main__":
-    run_screener()
+    try:
+        # Windows compatibility fix
+        if sys.platform.startswith('win'):
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        
+        # Run the bot
+        run_bot()
+    except KeyboardInterrupt:
+        print("Bot stopped by user")
+    except Exception as e:
+        print(f"Error: {e}")

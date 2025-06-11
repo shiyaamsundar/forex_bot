@@ -28,9 +28,29 @@ OANDA_URL = os.getenv('OANDA_URL')
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
+# Track sent alerts to prevent duplicates
+sent_alerts = {}
+ALERT_EXPIRY = 1800  # 30 minutes in seconds
+
 HEADERS = {
     'Authorization': f'Bearer {OANDA_API_KEY}'
 }
+
+def is_alert_sent(instrument, timeframe, pattern_type, level_type=None):
+    """Check if an alert was recently sent"""
+    key = f"{instrument}_{timeframe}_{pattern_type}_{level_type if level_type else ''}"
+    if key in sent_alerts:
+        # Check if alert is still valid (within 30 minutes)
+        if time.time() - sent_alerts[key] < ALERT_EXPIRY:
+            return True
+        # Remove expired alert
+        del sent_alerts[key]
+    return False
+
+def mark_alert_sent(instrument, timeframe, pattern_type, level_type=None):
+    """Mark an alert as sent"""
+    key = f"{instrument}_{timeframe}_{pattern_type}_{level_type if level_type else ''}"
+    sent_alerts[key] = time.time()
 
 def send_telegram_alert(message):
     
@@ -191,6 +211,10 @@ def check_cpr_engulfing(instrument, timeframe):
         else:
             return False  # Pattern not at the right CPR level
 
+        # Check if alert was recently sent
+        if is_alert_sent(instrument, timeframe, pattern_type, level_type):
+            return False
+
         message = f"{emoji} <b>{pattern_type} Engulfing near CPR {level_type}</b>\n\n" \
                   f"Pair: {instrument}\n" \
                   f"Timeframe: {timeframe}\n" \
@@ -201,6 +225,7 @@ def check_cpr_engulfing(instrument, timeframe):
 
         print(f"CPR {pattern_type} Engulfing detected for {instrument} on {timeframe}")
         send_telegram_alert(message)
+        mark_alert_sent(instrument, timeframe, pattern_type, level_type)
         return True
 
     except Exception as e:
@@ -217,6 +242,10 @@ def check_engulfing(instrument="EUR_GBP", timeframe="M1"):
         prev, curr = candles[-2], candles[-1]
 
         if is_bullish_engulfing(prev, curr):
+            # Check if alert was recently sent
+            if is_alert_sent(instrument, timeframe, "BULLISH"):
+                return None
+                
             message = f"🚀 <b>BULLISH Engulfing</b>\n\n" \
                      f"Pair: {instrument}\n" \
                      f"Timeframe: {timeframe}\n" \
@@ -224,8 +253,13 @@ def check_engulfing(instrument="EUR_GBP", timeframe="M1"):
                      f"Close: {curr['close']:.5f}\n" \
                      f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             send_telegram_alert(message)
+            mark_alert_sent(instrument, timeframe, "BULLISH")
             return message
         elif is_bearish_engulfing(prev, curr):
+            # Check if alert was recently sent
+            if is_alert_sent(instrument, timeframe, "BEARISH"):
+                return None
+                
             message = f"🔻 <b>BEARISH Engulfing</b>\n\n" \
                      f"Pair: {instrument}\n" \
                      f"Timeframe: {timeframe}\n" \
@@ -233,6 +267,7 @@ def check_engulfing(instrument="EUR_GBP", timeframe="M1"):
                      f"Close: {curr['close']:.5f}\n" \
                      f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             send_telegram_alert(message)
+            mark_alert_sent(instrument, timeframe, "BEARISH")
             return message
         return None
     except Exception as e:
@@ -340,4 +375,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    test_telegram_bot()
