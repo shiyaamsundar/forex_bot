@@ -290,6 +290,49 @@ def check_engulfing(instrument="EUR_GBP", timeframe="M1"):
     except Exception as e:
         #logger.error(f"Error checking engulfing pattern: {str(e)}")
         return None
+def check_prev_day_breakout(instrument, timeframe):
+    try:
+        # Get previous 2 daily candles
+        daily_candles = get_candles(instrument, "D", count=2)
+        if len(daily_candles) < 2:
+            print(f"Not enough daily candles for {instrument}")
+            return False
+
+        prev_day = daily_candles[-2]
+        prev_high = prev_day["high"]
+        prev_low = prev_day["low"]
+
+        # Get latest candle on current timeframe
+        recent_candles = get_candles(instrument, timeframe, count=1)
+        if not recent_candles:
+            return False
+
+        curr = recent_candles[-1]
+
+        # Check breakout
+        if curr["high"] > prev_high and not is_alert_sent(instrument, timeframe, "BREAKOUT", "HIGH"):
+            message = f"📈 <b>Breakout Above Previous Day High</b>\n\n" \
+                      f"Pair: {instrument}\nTimeframe: {timeframe}\n" \
+                      f"Current High: {curr['high']:.5f}\nPrev High: {prev_high:.5f}\n" \
+                      f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            send_telegram_alert(message)
+            mark_alert_sent(instrument, timeframe, "BREAKOUT", "HIGH")
+            return True
+
+        elif curr["low"] < prev_low and not is_alert_sent(instrument, timeframe, "BREAKOUT", "LOW"):
+            message = f"📉 <b>Breakdown Below Previous Day Low</b>\n\n" \
+                      f"Pair: {instrument}\nTimeframe: {timeframe}\n" \
+                      f"Current Low: {curr['low']:.5f}\nPrev Low: {prev_low:.5f}\n" \
+                      f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            send_telegram_alert(message)
+            mark_alert_sent(instrument, timeframe, "BREAKOUT", "LOW")
+            return True
+
+        return False
+    except Exception as e:
+        print(f"Error in prev day breakout check for {instrument} {timeframe}: {str(e)}")
+        return False
+
 
 def get_next_interval():
     """Calculate seconds until next 30-minute interval"""
@@ -318,6 +361,7 @@ def monitor_instrument(instrument, timeframes):
             for tf in timeframes:
                 signal = check_engulfing(instrument, tf)
                 cpr_signal = check_cpr_engulfing(instrument, tf)
+                breakout_signal = check_prev_day_breakout(instrument, tf)
                 if signal or cpr_signal:
                     #logger.info(signal)
                     pass
