@@ -5,6 +5,7 @@ import requests
 from dotenv import load_dotenv
 from tabulate import tabulate
 from nsepython import nse_fno, nse_eq
+import nsepython 
 
 # Load Telegram Bot credentials
 load_dotenv()
