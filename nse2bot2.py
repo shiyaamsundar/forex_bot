@@ -10,6 +10,12 @@ from nsepython import nse_fno, nse_eq
 load_dotenv()
 BOT_TOKEN = os.getenv("TELEGRAM_NSE_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID_2")
+nsepython.requests = requests.Session()
+nsepython.requests.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br"
+})
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 DOWNLOAD_DIR = "downloads"
