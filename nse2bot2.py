@@ -1,16 +1,19 @@
 import os
 import time
-import pandas as pd
 import requests
+import pandas as pd
 from dotenv import load_dotenv
 from tabulate import tabulate
-from nsepython import nse_fno, nse_eq
-import nsepython 
+import nsepython
+from nsepython import nse_eq, nse_fno
 
-# Load Telegram Bot credentials
+# Load environment variables
 load_dotenv()
 BOT_TOKEN = os.getenv("TELEGRAM_NSE_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID_2")
+API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
+# Set headers to avoid blocks on Render
 nsepython.requests = requests.Session()
 nsepython.requests.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -18,25 +21,29 @@ nsepython.requests.headers.update({
     "Accept-Encoding": "gzip, deflate, br"
 })
 
-API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+# Setup download directory
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Track which chat is waiting for Excel
+# Track chats awaiting uploads
 waiting_for_excel = set()
 
 def fetch_pe_ratios(df):
     df["Company PE"] = None
     df["Industry PE"] = None
+
     for idx, row in df.iterrows():
         symbol = str(row["Symbol"]).strip().upper()
+        if not symbol:
+            continue
+
         try:
             data = nse_fno(symbol)
             pe = data.get("metadata", {}).get("pdSymbolPe")
             ind_pe = data.get("metadata", {}).get("pdSectorPe")
 
-            if pe is None or ind_pe is None:
-                # fallback to nse_eq
+            # Fallback if not found in FNO
+            if not pe or not ind_pe:
                 data = nse_eq(symbol)
                 pe = data.get("metadata", {}).get("pdSymbolPe")
                 ind_pe = data.get("metadata", {}).get("pdSectorPe")
@@ -45,14 +52,15 @@ def fetch_pe_ratios(df):
             df.at[idx, "Industry PE"] = float(ind_pe) if ind_pe else None
             print(f"✅ {symbol}: PE = {pe}, Industry PE = {ind_pe}")
         except Exception as e:
-            print(f"❌ {symbol} failed: {e}")
+            print(f"❌ {symbol} fetch failed: {e}")
         time.sleep(1)
+    
     return df
 
 def apply_filter(df):
     df["Company PE"] = pd.to_numeric(df["Company PE"], errors="coerce")
     df["Industry PE"] = pd.to_numeric(df["Industry PE"], errors="coerce")
-    df["ROE"] = 12
+    df["ROE"] = 12  # Default values; replace if Excel provides
     df["EPS"] = 12
     df["PB Ratio"] = 3
     return df[
@@ -79,13 +87,14 @@ def download_excel(file_id):
             f.write(requests.get(file_url).content)
         return local_path
     except Exception as e:
-        print(f"❌ Download error: {e}")
+        print(f"❌ Download failed: {e}")
         return None
 
 def process_excel(file_path, chat_id):
     try:
         df = pd.read_excel(file_path, skiprows=1)
         df.columns = df.columns.str.strip()
+
         df = fetch_pe_ratios(df)
         filtered = apply_filter(df)
 
@@ -96,22 +105,17 @@ def process_excel(file_path, chat_id):
 
             display_df = filtered[["Symbol", "Company PE", "Industry PE", "ROE", "EPS", "PB Ratio"]].round(2)
             table = tabulate(display_df, headers="keys", tablefmt="grid", showindex=False)
+
+            # Telegram has a message limit (~4096 chars), split if needed
             chunks = [table[i:i+4000] for i in range(0, len(table), 4000)]
             for chunk in chunks:
                 send_message(f"<pre>{chunk}</pre>", chat_id)
     except Exception as e:
-        send_message(f"❌ Failed to process file:\n<pre>{e}</pre>", chat_id)
+        send_message(f"❌ Failed to process Excel:\n<pre>{e}</pre>", chat_id)
 
 def poll_updates():
-    print("🤖 Bot is live. Send /start to begin.")
-
-    try:
-        res = requests.get(f"{API_URL}/getUpdates", params={"timeout": 5}).json()
-        updates = res.get("result", [])
-        last_update_id = updates[-1]["update_id"] if updates else None
-    except Exception as e:
-        print(f"❌ Could not initialize polling: {e}")
-        last_update_id = None
+    print("🤖 Bot is live. Waiting for /start and Excel uploads...")
+    last_update_id = None
 
     while True:
         try:
@@ -126,7 +130,7 @@ def poll_updates():
                 chat_id = message.get("chat", {}).get("id")
 
                 if "text" in message and message["text"].lower() in ["/start", "hi", "hello"]:
-                    send_message("👋 Welcome! Please upload an Excel file (.xlsx or .xls) with a 'Symbol' column.", chat_id)
+                    send_message("👋 Welcome! Upload an Excel file (.xlsx/.xls) with a 'Symbol' column to begin.", chat_id)
                     waiting_for_excel.add(chat_id)
 
                 elif chat_id in waiting_for_excel and "document" in message:
@@ -148,7 +152,7 @@ def poll_updates():
                         send_message("⚠️ Only Excel files (.xlsx or .xls) are supported.", chat_id)
 
                 elif "document" in message:
-                    send_message("ℹ️ Please first send /start before uploading a file.", chat_id)
+                    send_message("ℹ️ Please send /start before uploading a file.", chat_id)
 
         except Exception as e:
             print(f"❌ Polling error: {e}")
