@@ -1,134 +1,100 @@
 import os
-from dotenv import load_dotenv
+import time
 import requests
+import pandas as pd
+from tabulate import tabulate
+from dotenv import load_dotenv
+from nsepython import nse_eq, nse_fno
 
 # Load environment variables
 load_dotenv()
 
-# Get Telegram configuration
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID_2')
+# Input directory
+DOWNLOAD_DIR = "downloads"
 
+def fetch_pe_ratios(df):
+    df["Company PE"] = None
+    df["Industry PE"] = None
 
-def send_telegram_alert(message):
-    """Send message to Telegram"""
+    for idx, row in df.iterrows():
+        symbol = str(row["Symbol"]).strip().upper()
+        if not symbol:
+            continue
+
+        try:
+            data = nse_fno(symbol)
+            pe = data.get("metadata", {}).get("pdSymbolPe")
+            ind_pe = data.get("metadata", {}).get("pdSectorPe")
+
+            # Fallback to EQ if missing
+            if not pe or not ind_pe:
+                data = nse_eq(symbol)
+                pe = data.get("metadata", {}).get("pdSymbolPe")
+                ind_pe = data.get("metadata", {}).get("pdSectorPe")
+
+            df.at[idx, "Company PE"] = float(pe) if pe else None
+            df.at[idx, "Industry PE"] = float(ind_pe) if ind_pe else None
+
+            print(f"✅ {symbol}: PE = {pe}, Industry PE = {ind_pe}")
+        except Exception as e:
+            print(f"❌ {symbol} fetch failed: {e}")
+
+        time.sleep(1)  # Avoid being blocked
+
+    return df
+
+def apply_filter(df):
+    df["Company PE"] = pd.to_numeric(df["Company PE"], errors="coerce")
+    df["Industry PE"] = pd.to_numeric(df["Industry PE"], errors="coerce")
+
+    if "ROE" not in df.columns:
+        df["ROE"] = 12
+    if "EPS" not in df.columns:
+        df["EPS"] = 12
+    if "PB Ratio" not in df.columns:
+        df["PB Ratio"] = 3
+
+    return df[
+        (df["Company PE"] < df["Industry PE"]) &
+        (df["ROE"].between(10, 15)) &
+        (df["EPS"].between(10, 15)) &
+        (df["PB Ratio"].between(1, 5))
+    ]
+
+def process_excel(file_path):
+    print(f"\n📁 Processing: {file_path}")
     try:
-        if not message or not message.strip():
-            print("Cannot send empty message to Telegram")
+        df = pd.read_excel(file_path, skiprows=1)
+        df.columns = df.columns.str.strip()
+
+        if "Symbol" not in df.columns:
+            print("❌ 'Symbol' column not found. Skipping this file.")
             return
 
-        if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-            print("Telegram configuration missing. Please check your .env file")
-            return
+        df = fetch_pe_ratios(df)
+        filtered = apply_filter(df)
 
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        payload = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": message,
-            "parse_mode": "HTML"
-        }
-
-        response = requests.post(url, json=payload)
-        response.raise_for_status()
-        print(f"✅ Message sent: {message}")
-        return True
-
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Failed to send Telegram alert: {e}")
-        if e.response is not None:
-            try:
-                error_data = e.response.json()
-                print(f"Telegram API error: {error_data}")
-            except Exception:
-                pass
-    except Exception as e:
-        print(f"❌ Unexpected error sending Telegram alert: {e}")
-    return False
-
-
-def get_chat_id():
-    """Get chat ID from Telegram bot"""
-    try:
-        if not TELEGRAM_BOT_TOKEN:
-            print("Telegram bot token not found. Please check your .env file")
-            return None
-
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
-        response = requests.get(url)
-        response.raise_for_status()
-        data = response.json()
-
-        if not data.get("ok"):
-            print("Telegram API error:", data.get("description", "Unknown error"))
-            return None
-
-        results = data.get("result", [])
-        for item in reversed(results):
-            if "message" in item:
-                return item["message"]["chat"]["id"]
-
-        print("No valid message found in updates")
-    except Exception as e:
-        print(f"❌ Error getting chat ID: {e}")
-    return None
-
-
-def test_telegram_bot():
-    """Test Telegram bot configuration"""
-    global TELEGRAM_CHAT_ID
-
-    print("🔍 Testing Telegram bot...")
-
-    test_message = "🤖 <b>Telegram Bot Test</b>\n\nThis is a test message to verify bot configuration."
-
-    if TELEGRAM_CHAT_ID:
-        print(f"Using TELEGRAM_CHAT_ID from .env: {TELEGRAM_CHAT_ID}")
-        if send_telegram_alert(test_message):
-            print("✅ Bot test successful!")
-            return True
+        if filtered.empty:
+            print("⚠️ No stocks matched the filter criteria.")
         else:
-            print("⚠️ Test failed. Trying to fetch new chat ID...")
+            print("\n📊 Filtered Stocks:")
+            display_df = filtered[["Symbol", "Company PE", "Industry PE", "ROE", "EPS", "PB Ratio"]].round(2)
+            table = tabulate(display_df, headers="keys", tablefmt="grid", showindex=False)
+            print(table)
 
-    chat_id = get_chat_id()
-    if not chat_id:
-        print("❌ Could not get chat ID. Make sure you've messaged the bot.")
-        return False
-
-    TELEGRAM_CHAT_ID = str(chat_id)
-
-    # Update or append TELEGRAM_CHAT_ID in .env
-    try:
-        if os.path.exists('.env'):
-            with open('.env', 'r') as f:
-                lines = f.readlines()
-
-            updated = False
-            with open('.env', 'w') as f:
-                for line in lines:
-                    if line.startswith("TELEGRAM_CHAT_ID="):
-                        f.write(f"TELEGRAM_CHAT_ID={chat_id}\n")
-                        updated = True
-                    else:
-                        f.write(line)
-                if not updated:
-                    f.write(f"\nTELEGRAM_CHAT_ID={chat_id}\n")
-        else:
-            with open('.env', 'w') as f:
-                f.write(f"TELEGRAM_CHAT_ID={chat_id}\n")
-        print(f"✅ Chat ID saved to .env: {chat_id}")
     except Exception as e:
-        print(f"⚠️ Could not save chat ID to .env: {e}")
-
-    if send_telegram_alert(test_message):
-        print("✅ Bot test successful with new chat ID!")
-        return True
-
-    print("❌ Bot test failed!")
-    return False
-
+        print(f"❌ Failed to process {file_path}: {e}")
 
 if __name__ == "__main__":
-    if test_telegram_bot():
-        print("🚀 Bot is ready!")
+    if not os.path.exists(DOWNLOAD_DIR):
+        print(f"❌ Folder not found: {DOWNLOAD_DIR}")
+        exit()
+
+    excel_files = [f for f in os.listdir(DOWNLOAD_DIR) if f.endswith((".xlsx", ".xls"))]
+
+    if not excel_files:
+        print("📂 No Excel files found in the downloads folder.")
     else:
-        print("🛑 Bot setup failed. Please check your config.")
+        for excel_file in excel_files:
+            full_path = os.path.join(DOWNLOAD_DIR, excel_file)
+            process_excel(full_path)

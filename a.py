@@ -290,7 +290,7 @@ def check_engulfing(instrument="EUR_GBP", timeframe="M1"):
     except Exception as e:
         #logger.error(f"Error checking engulfing pattern: {str(e)}")
         return None
-def check_prev_day_breakout(instrument, timeframe):
+def check_prev_day_breakout1(instrument, timeframe):
     try:
         # Get previous 2 daily candles
         daily_candles = get_candles(instrument, "D", count=2)
@@ -323,6 +323,56 @@ def check_prev_day_breakout(instrument, timeframe):
             message = f"📉 <b>Breakdown Below Previous Day Low</b>\n\n" \
                       f"Pair: {instrument}\nTimeframe: {timeframe}\n" \
                       f"Current Low: {curr['low']:.5f}\nPrev Low: {prev_low:.5f}\n" \
+                      f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            send_telegram_alert(message)
+            mark_alert_sent(instrument, timeframe, "BREAKOUT", "LOW")
+            return True
+
+        return False
+    except Exception as e:
+        print(f"Error in prev day breakout check for {instrument} {timeframe}: {str(e)}")
+        return False
+
+
+def check_prev_day_breakout(instrument, timeframe):
+    try:
+        # Get previous 2 daily candles
+        daily_candles = get_candles(instrument, "D", count=2)
+        if len(daily_candles) < 2:
+            print(f"Not enough daily candles for {instrument}")
+            return False
+
+        prev_day = daily_candles[-2]
+        prev_high = prev_day["high"]
+        prev_low = prev_day["low"]
+
+        # Get latest completed candle on current timeframe
+        recent_candles = get_candles(instrument, timeframe, count=2)
+        if not recent_candles or len(recent_candles) < 2:
+            return False
+
+        curr = recent_candles[-1]  # latest candle (most recent completed)
+
+        if not curr["complete"]:
+            print(f"Skipping incomplete candle for {instrument} {timeframe}")
+            return False
+
+        close_price = curr["close"]
+
+        # Check breakout on close
+        if close_price > prev_high and not is_alert_sent(instrument, timeframe, "BREAKOUT", "HIGH"):
+            message = f"📈 <b>Breakout (Close) Above Previous Day High</b>\n\n" \
+                      f"Pair: {instrument}\nTimeframe: {timeframe}\n" \
+                      f"Close: {close_price:.5f}\nPrev High: {prev_high:.5f}\n" \
+                      f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            send_telegram_alert(message)
+            mark_alert_sent(instrument, timeframe, "BREAKOUT", "HIGH")
+            return True
+
+        elif close_price < prev_low and not is_alert_sent(instrument, timeframe, "BREAKOUT", "LOW"):
+            message = f"📉 <b>Breakdown (Close) Below Previous Day Low</b>\n\n" \
+                      f"Pair: {instrument}\nTimeframe: {timeframe}\n" \
+                      f"Close: {close_price:.5f}\nPrev Low: {prev_low:.5f}\n" \
                       f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             send_telegram_alert(message)
             mark_alert_sent(instrument, timeframe, "BREAKOUT", "LOW")
