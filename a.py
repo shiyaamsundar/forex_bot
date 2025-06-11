@@ -7,6 +7,8 @@ import threading
 from flask import Flask, jsonify
 import os
 from dotenv import load_dotenv
+from nse2bot2 import poll_updates
+
 
 # Load environment variables
 load_dotenv()
@@ -355,6 +357,9 @@ def main():
 
     alive_thread = threading.Thread(target=keep_server_alive, daemon=True)
     alive_thread.start()
+    
+    telegram_thread = threading.Thread(target=poll_updates, daemon=True)
+    telegram_thread.start()
     #logger.info("Server alive checker started")
 
     test_telegram_bot()
@@ -394,3 +399,6 @@ def main():
 if __name__ == "__main__":
     main()
     test_telegram_bot()
+    poll_updates()
+
+

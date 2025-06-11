@@ -2,16 +2,20 @@ import os
 import time
 import pandas as pd
 import requests
-from nsepython import nse_eq
 from dotenv import load_dotenv
+from tabulate import tabulate
+from nsepython import nse_eq
 
+
+# Load Telegram Bot credentials
 load_dotenv()
-
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+BOT_TOKEN = os.getenv("TELEGRAM_NSE_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID_2")
+
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
 
 def fetch_pe_ratios(df):
     df["Company PE"] = None
@@ -50,10 +54,6 @@ def send_message(text, chat_id):
         "parse_mode": "HTML"
     })
 
-def send_file(file_path, chat_id):
-    with open(file_path, "rb") as f:
-        requests.post(f"{API_URL}/sendDocument", data={"chat_id": chat_id}, files={"document": f})
-
 def download_excel(file_id):
     file_info = requests.get(f"{API_URL}/getFile", params={"file_id": file_id}).json()
     file_path = file_info["result"]["file_path"]
@@ -69,22 +69,45 @@ def process_excel(file_path, chat_id):
         df.columns = df.columns.str.strip()
         df = fetch_pe_ratios(df)
         filtered = apply_filter(df)
+
         if filtered.empty:
             send_message("⚠️ No stocks matched the criteria.", chat_id)
         else:
-            msg = "📊 <b>Filtered Results</b>\n\n"
-            for _, row in filtered.iterrows():
-                msg += f"🔹 <b>{row['Symbol']}</b>: PE = {row['Company PE']} > {row['Industry PE']}, ROE = {row['ROE']}%, EPS = {row['EPS']}, PB = {row['PB Ratio']}\n"
-            send_message(msg, chat_id)
+            send_message("📊 <b>Filtered Stocks</b>", chat_id)
 
-            out_path = "filtered_nse_results.xlsx"
-            filtered.to_excel(out_path, index=False)
-            send_file(out_path, chat_id)
+            # Clean up and round for display
+            display_df = filtered[["Symbol", "Company PE", "Industry PE", "ROE", "EPS", "PB Ratio"]].round(2)
+            table = tabulate(display_df, headers="keys", tablefmt="grid", showindex=False)
+
+            # Break into chunks (Telegram max is 4096 chars)
+            chunks = [table[i:i+4000] for i in range(0, len(table), 4000)]
+            for chunk in chunks:
+                send_message(f"<pre>{chunk}</pre>", chat_id)
+
     except Exception as e:
         send_message(f"❌ Failed to process file:\n<pre>{e}</pre>", chat_id)
 
+def get_latest_chat_id():
+    try:
+        response = requests.get(f"{API_URL}/getUpdates").json()
+        results = response.get("result", [])
+        if not results:
+            print("⚠️ No messages received yet. Send a message to the bot first.")
+            return None
+
+        last_message = results[-1]
+        chat = last_message.get("message", {}).get("chat", {})
+        chat_id = chat.get("id")
+        username = chat.get("username", "N/A")
+        print(f"✅ Latest Chat ID: {chat_id} (Username: @{username})")
+        return chat_id
+
+    except Exception as e:
+        print(f"❌ Failed to fetch chat ID: {e}")
+        return None
+
 def poll_updates():
-    print("🤖 Bot is running... waiting for file uploads")
+    print("🤖 Bot is running... waiting for Excel uploads.")
     last_update_id = None
     while True:
         try:
@@ -105,10 +128,11 @@ def poll_updates():
                     else:
                         send_message("⚠️ Only Excel files are supported (.xlsx or .xls)", chat_id)
                 elif "text" in message and message["text"].lower() in ["/start", "hi", "hello"]:
-                    send_message("👋 Send me an Excel file with a 'Symbol' column. I will process and return filtered results.", chat_id)
+                    send_message("👋 Send me an Excel file with a 'Symbol' column. I will return filtered stock results as a table.", chat_id)
         except Exception as e:
-            print("❌ Polling error:", e)
+            print(f"❌ Polling error: {e}")
         time.sleep(2)
 
 if __name__ == "__main__":
     poll_updates()
+    #get_latest_chat_id()
