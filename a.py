@@ -358,24 +358,33 @@ def check_prev_day_breakout(instrument, timeframe):
             return False
 
         close_price = curr["close"]
+        current_date = datetime.now().strftime('%Y-%m-%d')
 
         # Check breakout on close
-        if close_price > prev_high and not is_alert_sent(instrument, timeframe, "BREAKOUT", "HIGH"):
+        if close_price > prev_high:
+            # Check if we've already sent a breakout alert for this instrument today
+            if is_alert_sent(instrument, "D", "BREAKOUT", f"HIGH_{current_date}"):
+                return False
+                
             message = f"📈 <b>Breakout (Close) Above Previous Day High</b>\n\n" \
                       f"Pair: {instrument}\nTimeframe: {timeframe}\n" \
                       f"Close: {close_price:.5f}\nPrev High: {prev_high:.5f}\n" \
                       f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             send_telegram_alert(message)
-            mark_alert_sent(instrument, timeframe, "BREAKOUT", "HIGH")
+            mark_alert_sent(instrument, "D", "BREAKOUT", f"HIGH_{current_date}")
             return True
 
-        elif close_price < prev_low and not is_alert_sent(instrument, timeframe, "BREAKOUT", "LOW"):
+        elif close_price < prev_low:
+            # Check if we've already sent a breakdown alert for this instrument today
+            if is_alert_sent(instrument, "D", "BREAKOUT", f"LOW_{current_date}"):
+                return False
+                
             message = f"📉 <b>Breakdown (Close) Below Previous Day Low</b>\n\n" \
                       f"Pair: {instrument}\nTimeframe: {timeframe}\n" \
                       f"Close: {close_price:.5f}\nPrev Low: {prev_low:.5f}\n" \
                       f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             send_telegram_alert(message)
-            mark_alert_sent(instrument, timeframe, "BREAKOUT", "LOW")
+            mark_alert_sent(instrument, "D", "BREAKOUT", f"LOW_{current_date}")
             return True
 
         return False
