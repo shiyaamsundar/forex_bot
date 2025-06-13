@@ -40,15 +40,16 @@ HEADERS = {
 }
 
 def clear_expired_alerts():
-    """Clear all expired alerts"""
+    """Clear expired alerts every 30 mins and reset daily breakouts at midnight"""
     global last_clear_time
     current_time = time.time()
-    
-    # Only clear if 30 minutes have passed since last clear
-    if current_time - last_clear_time >= ALERT_EXPIRY:
+    now = datetime.now()
+
+    # Clear if 30 mins passed or it's just after midnight
+    if current_time - last_clear_time >= ALERT_EXPIRY or now.strftime('%H:%M') == "00:01":
         sent_alerts.clear()
         last_clear_time = current_time
-        print(f"Cleared all alerts at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Cleared expired/daily alerts")
 
 def is_alert_sent(instrument, timeframe, pattern_type, level_type=None):
     """Check if an alert was recently sent"""
@@ -176,7 +177,7 @@ def is_bearish_engulfing(prev, curr):
     )
 
 
-def check_cpr_engulfing(instrument, timeframe):
+def check_cpr_engulfing1(instrument, timeframe):
     """
     Detect bullish or bearish engulfing near CPR levels based on previous day's CPR.
     Only alert:
@@ -248,6 +249,77 @@ def check_cpr_engulfing(instrument, timeframe):
     except Exception as e:
         print(f"Error in CPR check for {instrument} {timeframe}: {str(e)}")
         return False
+
+
+def check_cpr_engulfing(instrument, timeframe):
+    """
+    Detect bullish or bearish engulfing near CPR levels based on previous day's CPR.
+    Only alert:
+    - Bearish near TC
+    - Bullish near BC
+    """
+    try:
+        daily_candles = get_candles(instrument, "D", count=2)
+        if len(daily_candles) < 2:
+            print(f"Not enough daily candles for CPR on {instrument}")
+            return False
+
+        prev_day = daily_candles[-2]
+        high = prev_day["high"]
+        low = prev_day["low"]
+        close = prev_day["close"]
+
+        pivot = (high + low + close) / 3
+        bc = (high + low) / 2
+        tc = (pivot - bc) + pivot
+
+        recent_candles = get_candles(instrument, timeframe, count=2)
+        if len(recent_candles) < 2:
+            print(f"Not enough candles for engulfing check on {instrument} {timeframe}")
+            return False
+
+        prev, curr = recent_candles[-2], recent_candles[-1]
+
+        # Looser threshold for proximity (~10 pips for forex)
+        threshold = max((high - low) * 0.01, 0.0010)
+
+        near_tc = abs(curr["close"] - tc) <= threshold
+        near_bc = abs(curr["close"] - bc) <= threshold
+
+        if is_bearish_engulfing(prev, curr) and near_tc:
+            pattern_type = "BEARISH"
+            level_type = "TC"
+            level_val = tc
+            emoji = "🔻"
+        elif is_bullish_engulfing(prev, curr) and near_bc:
+            pattern_type = "BULLISH"
+            level_type = "BC"
+            level_val = bc
+            emoji = "🚀"
+        else:
+            print(f"No CPR engulfing pattern detected for {instrument} on {timeframe}")
+            return False
+
+        if is_alert_sent(instrument, timeframe, pattern_type, level_type):
+            return False
+
+        message = f"{emoji} <b>{pattern_type} Engulfing near CPR {level_type}</b>\n\n" \
+                  f"Pair: {instrument}\n" \
+                  f"Timeframe: {timeframe}\n" \
+                  f"Open: {curr['open']:.5f}\n" \
+                  f"Close: {curr['close']:.5f}\n" \
+                  f"CPR {level_type}: {level_val:.5f}\n" \
+                  f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+        send_telegram_alert(message)
+        mark_alert_sent(instrument, timeframe, pattern_type, level_type)
+        return True
+
+    except Exception as e:
+        print(f"Error in CPR check for {instrument} {timeframe}: {str(e)}")
+        return False
+
+
 
 
 def check_engulfing(instrument="EUR_GBP", timeframe="M1"):
@@ -336,12 +408,10 @@ def check_prev_day_breakout1(instrument, timeframe):
 
 def check_prev_day_breakout(instrument, timeframe):
     try:
-        # Skip non-intraday timeframes (e.g., D, W, M)
         if 'D' in timeframe or 'W' in timeframe or 'M' in timeframe:
             print(f"Skipping non-intraday timeframe: {timeframe}")
             return False
 
-        # Get previous 2 daily candles
         daily_candles = get_candles(instrument, "D", count=2)
         if len(daily_candles) < 2:
             print(f"Not enough daily candles for {instrument}")
@@ -351,7 +421,6 @@ def check_prev_day_breakout(instrument, timeframe):
         prev_high = prev_day["high"]
         prev_low = prev_day["low"]
 
-        # Get last 2 candles on current timeframe to ensure we have a completed one
         recent_candles = get_candles(instrument, timeframe, count=2)
         if len(recent_candles) < 2:
             print(f"Not enough intraday candles for {instrument} on {timeframe}")
@@ -362,96 +431,43 @@ def check_prev_day_breakout(instrument, timeframe):
             print(f"Skipping incomplete candle for {instrument} {timeframe}")
             return False
 
-        close_price = curr["close"]
         current_date = datetime.now().strftime('%Y-%m-%d')
+        open_price = curr["open"]
+        close_price = curr["close"]
 
-        # Breakout above previous day high
-        if close_price > prev_high:
+        # Bullish breakout: full body above previous day high
+        if open_price > prev_high and close_price > prev_high:
             alert_key = f"HIGH_{current_date}"
-            if is_alert_sent(instrument, "D", "BREAKOUT", alert_key):
+            if is_alert_sent(instrument, timeframe, "BREAKOUT", alert_key):
                 return False
 
-            message = f"📈 <b>Breakout (Close) Above Previous Day High</b>\n\n" \
+            message = f"📈 <b>Body Breakout Above Previous Day High</b>\n\n" \
                       f"Pair: {instrument}\nTimeframe: {timeframe}\n" \
-                      f"Close: {close_price:.5f}\nPrev High: {prev_high:.5f}\n" \
+                      f"Open: {open_price:.5f}\nClose: {close_price:.5f}\n" \
+                      f"Prev High: {prev_high:.5f}\n" \
                       f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             send_telegram_alert(message)
-            mark_alert_sent(instrument, "D", "BREAKOUT", alert_key)
+            mark_alert_sent(instrument, timeframe, "BREAKOUT", alert_key)
             return True
 
-        # Breakdown below previous day low
-        elif close_price < prev_low:
+        # Bearish breakdown: full body below previous day low
+        elif open_price < prev_low and close_price < prev_low:
             alert_key = f"LOW_{current_date}"
-            if is_alert_sent(instrument, "D", "BREAKOUT", alert_key):
+            if is_alert_sent(instrument, timeframe, "BREAKOUT", alert_key):
                 return False
 
-            message = f"📉 <b>Breakdown (Close) Below Previous Day Low</b>\n\n" \
+            message = f"📉 <b>Body Breakdown Below Previous Day Low</b>\n\n" \
                       f"Pair: {instrument}\nTimeframe: {timeframe}\n" \
-                      f"Close: {close_price:.5f}\nPrev Low: {prev_low:.5f}\n" \
+                      f"Open: {open_price:.5f}\nClose: {close_price:.5f}\n" \
+                      f"Prev Low: {prev_low:.5f}\n" \
                       f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             send_telegram_alert(message)
-            mark_alert_sent(instrument, "D", "BREAKOUT", alert_key)
+            mark_alert_sent(instrument, timeframe, "BREAKOUT", alert_key)
             return True
 
+        print(f"No body breakout for {instrument} on {timeframe}")
         return False
 
-    except Exception as e:
-        print(f"Error in prev day breakout check for {instrument} {timeframe}: {str(e)}")
-        return False
-
-    try:
-        # Get previous 2 daily candles
-        daily_candles = get_candles(instrument, "D", count=2)
-        if len(daily_candles) < 2:
-            print(f"Not enough daily candles for {instrument}")
-            return False
-
-        prev_day = daily_candles[-2]
-        prev_high = prev_day["high"]
-        prev_low = prev_day["low"]
-
-        # Get latest completed candle on current timeframe
-        recent_candles = get_candles(instrument, timeframe, count=2)
-        if not recent_candles or len(recent_candles) < 2:
-            return False
-
-        curr = recent_candles[-1]  # latest candle (most recent completed)
-
-        if not curr["complete"]:
-            print(f"Skipping incomplete candle for {instrument} {timeframe}")
-            return False
-
-        close_price = curr["close"]
-        current_date = datetime.now().strftime('%Y-%m-%d')
-
-        # Check breakout on close
-        if close_price > prev_high:
-            # Check if we've already sent a breakout alert for this instrument today
-            if is_alert_sent(instrument, "D", "BREAKOUT", f"HIGH_{current_date}"):
-                return False
-                
-            message = f"📈 <b>Breakout (Close) Above Previous Day High</b>\n\n" \
-                      f"Pair: {instrument}\nTimeframe: {timeframe}\n" \
-                      f"Close: {close_price:.5f}\nPrev High: {prev_high:.5f}\n" \
-                      f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            send_telegram_alert(message)
-            mark_alert_sent(instrument, "D", "BREAKOUT", f"HIGH_{current_date}")
-            return True
-
-        elif close_price < prev_low:
-            # Check if we've already sent a breakdown alert for this instrument today
-            if is_alert_sent(instrument, "D", "BREAKOUT", f"LOW_{current_date}"):
-                return False
-                
-            message = f"📉 <b>Breakdown (Close) Below Previous Day Low</b>\n\n" \
-                      f"Pair: {instrument}\nTimeframe: {timeframe}\n" \
-                      f"Close: {close_price:.5f}\nPrev Low: {prev_low:.5f}\n" \
-                      f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            send_telegram_alert(message)
-            mark_alert_sent(instrument, "D", "BREAKOUT", f"LOW_{current_date}")
-            return True
-
-        return False
     except Exception as e:
         print(f"Error in prev day breakout check for {instrument} {timeframe}: {str(e)}")
         return False
