@@ -557,10 +557,15 @@ def main():
         "WTICO_USD", "BCO_USD"
     ]
 
-    timeframes = ["M30"]
+    # Define instruments and their specific timeframes
+    instrument_timeframes = {
+        "CAD_JPY": ["M30", "H1"],  # CADJPY 30mins and 1HR
+        "XAU_USD": ["H1"],         # XAUUSD 1HR
+        "EUR_USD": ["M30"]         # EURUSD 30mins
+    }
 
     threads = []
-    for instrument in instruments:
+    for instrument, timeframes in instrument_timeframes.items():
         thread = threading.Thread(
             target=monitor_instrument,
             args=(instrument, timeframes),
@@ -568,7 +573,7 @@ def main():
         )
         thread.start()
         threads.append(thread)
-        #logger.info(f"Started monitoring {instrument}")
+        print(f"Started monitoring {instrument} on timeframes: {', '.join(timeframes)}")
 
     try:
         while True:
