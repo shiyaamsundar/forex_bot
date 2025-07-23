@@ -499,8 +499,8 @@ def monitor_instrument(instrument, timeframes):
             
             for tf in timeframes:
                 signal = check_engulfing(instrument, tf)
-                cpr_signal = check_cpr_engulfing(instrument, tf)
-                breakout_signal = check_prev_day_breakout(instrument, tf)
+                # cpr_signal = check_cpr_engulfing(instrument, tf)
+                # breakout_signal = check_prev_day_breakout(instrument, tf)
                 if signal or cpr_signal:
                     #logger.info(signal)
                     pass
@@ -559,9 +559,10 @@ def main():
 
     # Define instruments and their specific timeframes
     instrument_timeframes = {
-        "CAD_JPY": ["M30", "H1"],  # CADJPY 30mins and 1HR
-        "XAU_USD": ["H1"],         # XAUUSD 1HR
-        "EUR_USD": ["M30"]         # EURUSD 30mins
+        "EUR_USD": ["M30"],      # EURUSD 30mins
+        "XAU_USD": ["H1"],       # XAUUSD 1HR
+        "NZD_USD": ["M30"],     # NZDUSD 30mins
+        "ETH_USDT": ["H1"]      # ETHUSDT 1HR
     }
 
     threads = []
