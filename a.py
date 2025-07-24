@@ -103,10 +103,11 @@ def get_chat_id():
         response = requests.get(url)
         response.raise_for_status()
         data = response.json()
-        
+        # print(data,'data')
         if data["ok"] and data["result"]:
             latest_message = data["result"][-1]
             chat_id = latest_message["message"]["chat"]["id"]
+
             #logger.info(f"Found chat ID: {chat_id}")
             return chat_id
         else:
@@ -118,7 +119,7 @@ def get_chat_id():
 
 def test_telegram_bot():
     chat_id = get_chat_id()
-    print(chat_id,'chat_id')
+    #print(chat_id,'chat_id')
     if not chat_id:
         #logger.error("Could not get chat ID. Please make sure you've sent a message to your bot.")
         return
