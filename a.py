@@ -9,6 +9,15 @@ import os
 from dotenv import load_dotenv
 from nse2bot2 import poll_updates
 
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import pandas as pd
+
+
 
 # Load environment variables
 load_dotenv()
@@ -131,6 +140,212 @@ def test_telegram_bot():
                   "This is a test message to verify that the bot is working correctly.\n" \
                   "If you receive this message, the bot is properly configured!"
     send_telegram_alert(test_message)
+
+def fetch_investing_calendar():
+    # Set up headless Chrome options
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--user-agent=Mozilla/5.0")
+    
+    # Path to your matching ChromeDriver (v138)
+    service = Service(r"C:\webdrivers\chromedriver-win64\chromedriver.exe")
+    # Update this path as needed
+
+    driver = webdriver.Chrome(service=service, options=options)
+
+    try:
+        print("Opening Investing.com calendar...")
+        driver.get("https://www.investing.com/economic-calendar/")
+
+        # Wait until calendar table loads
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.ID, "economicCalendarData"))
+        )
+        
+        # Optional scroll to load more rows
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(2)
+
+        print("Extracting rows...")
+        rows = driver.find_elements(By.XPATH, "//table[@id='economicCalendarData']//tr[contains(@id,'eventRowId')]")
+        
+        events = []
+        for row in rows:
+            try:
+                time_ = row.find_element(By.CLASS_NAME, "first.left.time").text.strip()
+                currency = row.find_element(By.CLASS_NAME, "left.flagCur.noWrap").text.strip()
+                event = row.find_element(By.CLASS_NAME, "event").text.strip()
+                importance = len(row.find_elements(By.CLASS_NAME, "grayFullBullishIcon"))
+
+                events.append({
+                    "time": time_,
+                    "currency": currency,
+                    "event": event,
+                    "importance": importance
+                })
+            except Exception as e:
+                continue
+
+        df = pd.DataFrame(events)
+        print(df)
+        
+        # Send events to Telegram immediately
+        if not df.empty:
+            print("Calling send_events_to_telegram function...")
+            send_events_to_telegram(df)
+        else:
+            print("No events found in DataFrame")
+        
+        return df
+
+    finally:
+        driver.quit()
+
+
+def convert_to_indian_time(time_str):
+    """Convert time string to Indian time in 12-hour format"""
+    try:
+        # Parse the time string (assuming it's in GMT/UTC)
+        from datetime import datetime, timedelta
+        import pytz
+        
+        # Create a datetime object for today with the given time
+        today = datetime.now().date()
+        
+        # Parse the time string (format: HH:MM)
+        if ':' in time_str:
+            hour, minute = map(int, time_str.split(':'))
+        else:
+            # Handle cases where time might be in different format
+            hour, minute = 0, 0
+            
+        # Create datetime object in UTC
+        utc_time = datetime.combine(today, datetime.min.time().replace(hour=hour, minute=minute))
+        utc_time = pytz.utc.localize(utc_time)
+        
+        # Convert to Indian time (IST = UTC+5:30)
+        ist_tz = pytz.timezone('Asia/Kolkata')
+        ist_time = utc_time.astimezone(ist_tz)
+        
+        # Format in 12-hour format
+        return ist_time.strftime('%I:%M %p')
+        
+    except Exception as e:
+        print(f"Error converting time {time_str}: {e}")
+        return time_str
+
+def is_event_within_30_minutes(time_str):
+    """Check if event is within 30 minutes from now"""
+    try:
+        from datetime import datetime, timedelta
+        import pytz
+        
+        # Get current time in IST
+        ist_tz = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist_tz)
+        
+        # Parse the event time
+        today = now.date()
+        if ':' in time_str:
+            hour, minute = map(int, time_str.split(':'))
+        else:
+            return False
+            
+        # Create event time in IST
+        event_time = datetime.combine(today, datetime.min.time().replace(hour=hour, minute=minute))
+        event_time = ist_tz.localize(event_time)
+        
+        # Calculate time difference
+        time_diff = event_time - now
+        
+        # Check if event is within 30 minutes and not in the past
+        return timedelta(minutes=0) <= time_diff <= timedelta(minutes=30)
+        
+    except Exception as e:
+        print(f"Error checking event time {time_str}: {e}")
+        return False
+
+def send_events_to_telegram(df):
+    """Send economic events to Telegram with Indian time and 30-minute filter"""
+    print('hellohello')
+    if df.empty:
+        print("No economic events found.")
+        return
+
+    print(f"Total events found: {len(df)}")
+    
+    # Filter events that are within 30 minutes
+    upcoming_events = []
+    for _, row in df.iterrows():
+        indian_time = convert_to_indian_time(row['time'])
+        is_within_30 = is_event_within_30_minutes(row['time'])
+        print(f"Event: {row['time']} -> {indian_time} (IST), Within 30min: {is_within_30}")
+        
+        if is_event_within_30_minutes(row['time']):
+            upcoming_events.append({
+                'time': indian_time,
+                'currency': row['currency'],
+                'event': row['event'],
+                'importance': row['importance']
+            })
+    
+    print(f"Events within 30 minutes: {len(upcoming_events)}")
+    
+    if not upcoming_events:
+        print("No events within 30 minutes.")
+        return
+
+    # Create message with Indian time
+    message = "🚨 <b>Upcoming Economic Events (Next 30 mins)</b>\n\n"
+    
+    # Group events by importance
+    high_impact = [e for e in upcoming_events if e['importance'] == 3]
+    medium_impact = [e for e in upcoming_events if e['importance'] == 2]
+    low_impact = [e for e in upcoming_events if e['importance'] == 1]
+    
+    if high_impact:
+        message += "🔴 <b>High Impact Events:</b>\n"
+        for event in high_impact:
+            message += f"• {event['time']} | {event['currency']} | {event['event']}\n"
+        message += "\n"
+    
+    if medium_impact:
+        message += "🟡 <b>Medium Impact Events:</b>\n"
+        for event in medium_impact:
+            message += f"• {event['time']} | {event['currency']} | {event['event']}\n"
+        message += "\n"
+    
+    if low_impact:
+        message += "🟢 <b>Low Impact Events:</b>\n"
+        for event in low_impact:
+            message += f"• {event['time']} | {event['currency']} | {event['event']}\n"
+    
+    # Send the message
+    print(f"Sending message to Telegram: {message}")
+    send_telegram_alert(message)
+
+def send_today_economic_events():
+    df = fetch_investing_calendar()
+    if df.empty:
+        print("No economic events found.")
+        return
+
+    high_impact_events = df[df['importance'] == 3]
+    if high_impact_events.empty:
+        print("No high-impact events for today.")
+        return
+
+    for _, row in high_impact_events.iterrows():
+        indian_time = convert_to_indian_time(row['time'])
+        msg = f"📊 <b>Upcoming Economic Event</b>\n\n" \
+              f"🕒 Time: {indian_time} (IST)\n" \
+              f"💱 Currency: {row['currency']}\n" \
+              f"📌 Event: {row['event']}\n" \
+              f"⚠️ Impact: High"
+        send_telegram_alert(msg)
+        time.sleep(1)
 
 def get_candles(instrument="EUR_GBP", timeframe="H1", count=2):
     try:
@@ -547,6 +762,9 @@ def main():
     #logger.info("Server alive checker started")
 
     test_telegram_bot()
+    
+    # Send economic events at startup
+    send_today_economic_events()
 
     instruments = [
         "EUR_USD", "GBP_USD", "USD_JPY", "USD_CHF", "AUD_USD", "NZD_USD", "USD_CAD",
@@ -588,7 +806,7 @@ def main():
 
 if __name__ == "__main__":
     main()
-    test_telegram_bot()
+    #test_telegram_bot()
     #poll_updates()
 
 
