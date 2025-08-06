@@ -37,10 +37,8 @@ TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 sent_alerts = {}
 ALERT_EXPIRY = 1800  # 30 minutes in seconds
 last_clear_time = time.time()
-last_fetched_date = None
-global today_events
-global last_fetched_date
 today_events = []
+last_fetched_date = None
 
 HEADERS = {
     'Authorization': f'Bearer {OANDA_API_KEY}'
@@ -118,6 +116,7 @@ def send_telegram_alert(message):
         pass
 
 def fetch_calendar_once_per_day():
+    global last_fetched_date, today_events 
 
     while True:
         current_date = date.today()
