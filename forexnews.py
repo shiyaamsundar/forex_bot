@@ -39,6 +39,7 @@ ALERT_EXPIRY = 1800  # 30 minutes in seconds
 last_clear_time = time.time()
 last_fetched_date = None
 global today_events
+global last_fetched_date
 today_events = []
 
 HEADERS = {
@@ -117,7 +118,6 @@ def send_telegram_alert(message):
         pass
 
 def fetch_calendar_once_per_day():
-    global today_events, last_fetched_date
 
     while True:
         current_date = date.today()
@@ -585,7 +585,6 @@ def is_bearish_engulfing(prev, curr):
 # Global variable to store today's events
 
 def monitor_today_events():
-    global today_events
     already_alerted_30min = set()
     already_alerted_5min = set()
 
@@ -626,7 +625,6 @@ def monitor_today_events():
 
         time.sleep(60)
 
-    global today_events
     already_alerted_30min = set()
     already_alerted_5min = set()
 
