@@ -742,7 +742,7 @@ def run_flask():
 def keep_server_alive():
     while True:
         try:
-            response = requests.get('https://forex-bot-5o8q.onrender.com')
+            response = requests.get('https://forex-bot-1-c7bj.onrender.com')
             if response.status_code == 200:
                 #logger.info(f"Server alive check successful - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 pass
