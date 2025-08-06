@@ -157,7 +157,8 @@ def fetch_investing_calendar():
     service = Service("/usr/local/bin/chromedriver") 
     # Update this path as needed
 
-    driver = webdriver.Chrome(service=service, options=options)
+    #driver = webdriver.Chrome(service=service, options=options)
+    driver = webdriver.Chrome(service=Service("/usr/local/bin/chromedriver"), options=options)
 
     try:
         print("Opening Investing.com calendar...")
