@@ -669,7 +669,7 @@ def monitor_today_events():
         time.sleep(60)
 
 def monitor_today_events12():
-    global today_events
+    # global today_events
     already_alerted = set()  # Track alerted events to avoid duplicates
 
     while True:
