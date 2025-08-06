@@ -152,7 +152,7 @@ def fetch_investing_calendar():
     options.add_argument("--disable-dev-shm-usage")
 
     
-     if os.environ.get("DOCKER") == "true":
+    if os.environ.get("DOCKER") == "true":
         chrome_driver_path = "/usr/local/bin/chromedriver"
     else:
         chrome_driver_path = r"C:\\webdrivers\\chromedriver-win64\\chromedriver.exe"
