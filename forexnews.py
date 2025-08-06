@@ -38,6 +38,7 @@ sent_alerts = {}
 ALERT_EXPIRY = 1800  # 30 minutes in seconds
 last_clear_time = time.time()
 last_fetched_date = None
+today_events = []
 
 HEADERS = {
     'Authorization': f'Bearer {OANDA_API_KEY}'
@@ -581,7 +582,6 @@ def is_bearish_engulfing(prev, curr):
 
 
 # Global variable to store today's events
-today_events = []
 
 def monitor_today_events():
     global today_events
