@@ -38,6 +38,7 @@ sent_alerts = {}
 ALERT_EXPIRY = 1800  # 30 minutes in seconds
 last_clear_time = time.time()
 last_fetched_date = None
+global today_events
 today_events = []
 
 HEADERS = {
@@ -735,7 +736,7 @@ def keep_server_alive():
         time.sleep(60)
 
 def main():
-    global today_events
+
     test_telegram_bot()
 
     threading.Thread(target=run_flask, daemon=True).start()
