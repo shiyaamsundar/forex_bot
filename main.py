@@ -766,7 +766,7 @@ def main():
     telegram_thread.start()
     #logger.info("Server alive checker started")
 
-    test_telegram_bot()
+    #test_telegram_bot()
     
     # Send economic events at startup
     send_today_economic_events()
@@ -811,6 +811,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-    #test_telegram_bot()
+    test_telegram_bot()
     #poll_updates()
 
