@@ -148,9 +148,13 @@ def fetch_investing_calendar():
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--user-agent=Mozilla/5.0")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+
     
     # Path to your matching ChromeDriver (v138)
-    service = Service(r"C:\webdrivers\chromedriver-win64\chromedriver.exe")
+    #service = Service(r"C:\webdrivers\chromedriver-win64\chromedriver.exe")
+    service = Service("/usr/local/bin/chromedriver") 
     # Update this path as needed
 
     driver = webdriver.Chrome(service=service, options=options)
@@ -761,7 +765,7 @@ def main():
     telegram_thread.start()
     #logger.info("Server alive checker started")
 
-    test_telegram_bot()
+    #test_telegram_bot()
     
     # Send economic events at startup
     send_today_economic_events()
