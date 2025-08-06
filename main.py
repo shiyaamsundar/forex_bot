@@ -152,13 +152,13 @@ def fetch_investing_calendar():
     options.add_argument("--disable-dev-shm-usage")
 
     
-    if os.environ.get("DOCKER") == "true":
-        chrome_driver_path = "/usr/local/bin/chromedriver"
-    else:
-        chrome_driver_path = r"C:\\webdrivers\\chromedriver-win64\\chromedriver.exe"
+    # Path to your matching ChromeDriver (v138)
+    #service = Service(r"C:\webdrivers\chromedriver-win64\chromedriver.exe")
+    service = Service("/usr/local/bin/chromedriver") 
+    # Update this path as needed
 
-    service = Service(chrome_driver_path)
-    driver = webdriver.Chrome(service=service, options=options)
+    #driver = webdriver.Chrome(service=service, options=options)
+    driver = webdriver.Chrome(service=Service("/usr/local/bin/chromedriver"), options=options)
 
     try:
         print("Opening Investing.com calendar...")
@@ -813,5 +813,4 @@ if __name__ == "__main__":
     main()
     #test_telegram_bot()
     #poll_updates()
-
 
