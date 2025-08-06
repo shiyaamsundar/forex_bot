@@ -769,17 +769,16 @@ def main():
     #test_telegram_bot()
     
     # Send economic events at startup
-    send_today_economic_events()
 
-    instruments = [
-        "EUR_USD", "GBP_USD", "USD_JPY", "USD_CHF", "AUD_USD", "NZD_USD", "USD_CAD",
-        "EUR_GBP", "EUR_JPY", "EUR_CHF", "EUR_AUD", "EUR_NZD", "EUR_CAD",
-        "GBP_JPY", "GBP_CHF", "GBP_AUD", "GBP_NZD", "GBP_CAD",
-        "AUD_JPY", "NZD_JPY", "CAD_JPY", "CHF_JPY",
-        "AUD_CHF", "NZD_CHF", "CAD_CHF", "AUD_NZD", "AUD_CAD", "NZD_CAD",
-        "XAU_USD", "XAG_USD",
-        "WTICO_USD", "BCO_USD"
-    ]
+    # instruments = [
+    #     "EUR_USD", "GBP_USD", "USD_JPY", "USD_CHF", "AUD_USD", "NZD_USD", "USD_CAD",
+    #     "EUR_GBP", "EUR_JPY", "EUR_CHF", "EUR_AUD", "EUR_NZD", "EUR_CAD",
+    #     "GBP_JPY", "GBP_CHF", "GBP_AUD", "GBP_NZD", "GBP_CAD",
+    #     "AUD_JPY", "NZD_JPY", "CAD_JPY", "CHF_JPY",
+    #     "AUD_CHF", "NZD_CHF", "CAD_CHF", "AUD_NZD", "AUD_CAD", "NZD_CAD",
+    #     "XAU_USD", "XAG_USD",
+    #     "WTICO_USD", "BCO_USD"
+    # ]
 
     # Define instruments and their specific timeframes
     instrument_timeframes = {
@@ -798,6 +797,8 @@ def main():
         )
         thread.start()
         threads.append(thread)
+        check_engulfing(instrument,timeframe)
+
         print(f"Started monitoring {instrument} on timeframes: {', '.join(timeframes)}")
 
     try:
