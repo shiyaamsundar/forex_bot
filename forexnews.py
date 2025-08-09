@@ -399,11 +399,17 @@ def fetch_investing_calendar():
     
     # Path to your matching ChromeDriver (v138)
     #service = Service(r"C:\webdrivers\chromedriver-win64\chromedriver.exe")
-    service = Service("/usr/local/bin/chromedriver") 
+    #service = Service("/usr/local/bin/chromedriver") 
+    options.binary_location = "/usr/bin/chromium"  # <— important
+
+    # Use the apt-installed chromedriver
+    service = Service("/usr/bin/chromedriver")      # <— important
+
+    driver = webdriver.Chrome(service=service, options=options)
     # Update this path as needed
 
     #driver = webdriver.Chrome(service=service, options=options)
-    driver = webdriver.Chrome(service=Service("/usr/local/bin/chromedriver"), options=options)
+    #driver = webdriver.Chrome(service=Service("/usr/local/bin/chromedriver"), options=options)
 
     try:
         print("Opening Investing.com calendar...")
@@ -853,14 +859,11 @@ def keep_server_alive():
         try:
             response = requests.get('https://forex-bot-1-c7bj.onrender.com')
             if response.status_code == 200:
-                logger.info(f"Server alive check successful - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                pass
+                print(f"Server alive check OK - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
             else:
-                logger.error(f"Server alive check failed with status code: {response.status_code}")
-                pass
+                print(f"Server alive check failed: {response.status_code}", flush=True)
         except Exception as e:
-            logger.error(f"Error keeping server alive: {str(e)}")
-            pass
+            print(f"Error keeping server alive: {str(e)}", flush=True)
         time.sleep(60)
 
 def main():
