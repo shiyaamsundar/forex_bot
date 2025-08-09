@@ -1103,8 +1103,8 @@ def main():
     threading.Thread(target=keep_server_alive, daemon=True).start()
     threading.Thread(target=poll_updates, daemon=True).start()
 
-    threading.Thread(target=monitor_today_events, daemon=True).start()
-    threading.Thread(target=fetch_calendar_once_per_day, daemon=True).start()
+    # threading.Thread(target=monitor_today_events, daemon=True).start()
+    # threading.Thread(target=fetch_calendar_once_per_day, daemon=True).start()
 
 
     # Step 3: Monitor instruments for patterns
