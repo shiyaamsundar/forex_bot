@@ -32,10 +32,10 @@ def home():
 def run_flask():
     port = int(os.getenv("PORT", "10000"))
     app.run(host="0.0.0.0", port=port)
-    
+
 def keep_server_alive():
     """Optional health ping (use your own Render URL)."""
-    url = os.getenv("SELF_URL", "https://forex-bot-1-c7bj.onrender.com/")
+    url = os.getenv("SELF_URL", "https://forex-bot-v3wx.onrender.com/")
     while True:
         try:
             r = requests.get(url, timeout=10)
