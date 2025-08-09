@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 import threading
 from flask import Flask, jsonify
-import os
+import os, shutil
 from dotenv import load_dotenv
 from nse2bot2 import poll_updates
 
@@ -387,7 +387,7 @@ def test_telegram_bot():
                   "If you receive this message, the bot is properly configured!"
     send_telegram_alert(test_message)
 
-def fetch_investing_calendar():
+def fetch_investing_calendar1():
     # Set up headless Chrome options
     options = Options()
     options.add_argument("--headless")
@@ -464,6 +464,129 @@ def fetch_investing_calendar():
 
     finally:
         driver.quit()
+
+
+
+def fetch_investing_calendar():
+
+
+    # ---- Resolve Chrome/Driver paths (works locally & on Render) ----
+    possible_chromes = [
+        "/usr/bin/chromium",            # Debian/Render
+        "/usr/bin/chromium-browser",    # Ubuntu
+        "/opt/google/chrome/chrome",    # Google Chrome
+    ]
+    chrome_bin = next((p for p in possible_chromes if os.path.exists(p)), None)
+
+    possible_drivers = [
+        "/usr/bin/chromedriver",                 # Debian/Render
+        "/usr/lib/chromium/chromedriver",        # Debian alt
+        r"C:\webdrivers\chromedriver-win64\chromedriver.exe",  # local Windows
+    ]
+    driver_bin = next((p for p in possible_drivers if os.path.exists(p)), None)
+
+    options = Options()
+    # Headless flags that behave well on Render
+    options.add_argument("--headless=new")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                         "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
+
+    if chrome_bin:
+        options.binary_location = chrome_bin
+
+    # If driver not found, let Selenium Manager try (Selenium 4.10+). Otherwise use detected path.
+    if driver_bin and os.path.exists(driver_bin):
+        service = Service(driver_bin)
+        driver = webdriver.Chrome(service=service, options=options)
+    else:
+        driver = webdriver.Chrome(options=options)
+
+    try:
+        print("Opening Investing.com calendar...")
+        driver.get("https://www.investing.com/economic-calendar/")
+
+        # Handle cookie/consent if it appears (OneTrust)
+        try:
+            WebDriverWait(driver, 6).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "#onetrust-accept-btn-handler"))
+            ).click()
+            print("Accepted cookies.")
+        except Exception:
+            pass
+
+        # Wait for the table to be present
+        WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "table#economicCalendarData"))
+        )
+
+        # Wait until at least 1 event row is present
+        WebDriverWait(driver, 20).until(
+            EC.presence_of_all_elements_located((By.CSS_SELECTOR, "table#economicCalendarData tr[id*='eventRowId']"))
+        )
+
+        # Scroll a bit to ensure lazy rows load
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(2)
+
+        print("Extracting rows...")
+        rows = driver.find_elements(By.CSS_SELECTOR, "table#economicCalendarData tr[id*='eventRowId']")
+        events = []
+
+        for row in rows:
+            try:
+                # IMPORTANT: use CSS selectors (class names with dots). CLASS_NAME with spaces won't work.
+                # Time
+                time_el = row.find_element(By.CSS_SELECTOR, "td.time")
+                time_ = time_el.text.strip()
+
+                # Currency
+                # Some rows include a flag span + currency code; safest is the cell with those classes
+                currency_el = row.find_element(By.CSS_SELECTOR, "td.left.flagCur.noWrap")
+                currency = currency_el.text.strip()
+
+                # Event title (anchor inside .event cell)
+                try:
+                    event_el = row.find_element(By.CSS_SELECTOR, "td.event a, td.event")
+                except Exception:
+                    event_el = row.find_element(By.CSS_SELECTOR, "td.event")
+                event = event_el.text.strip()
+
+                # Importance: number of filled bull icons in the sentiment cell
+                importance_icons = row.find_elements(By.CSS_SELECTOR, "td.left.sentiment i.grayFullBullishIcon")
+                importance = len(importance_icons)
+
+                if time_ or event:
+                    events.append({
+                        "time": time_,
+                        "currency": currency,
+                        "event": event,
+                        "importance": importance
+                    })
+            except Exception as e:
+                # Skip malformed rows quietly
+                continue
+
+        df = pd.DataFrame(events)
+        print(f"Parsed {len(df)} events.")
+        if not df.empty:
+            print(df.head(10))
+            # For your “test send everything now” flow:
+            send_events_to_telegram(df)
+        else:
+            print("No events found in DataFrame")
+
+        return df
+    finally:
+        try:
+            driver.quit()
+        except Exception:
+            pass
 
 
 def convert_to_indian_time(time_str):
