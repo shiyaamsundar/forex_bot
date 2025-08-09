@@ -1,0 +1,5 @@
+id,title,country,impact,date,time,timestamp_utc,datetime_local,actual,forecast,previous,source_tz,local_tz
+,President Trump Speaks,USD,Medium,2025-08-05T08:00:00-04:00,,,,,,,America/New_York,Asia/Kolkata
+,ISM Services PMI,USD,High,2025-08-05T10:00:00-04:00,,,,,51.5,50.8,America/New_York,Asia/Kolkata
+,Unemployment Claims,USD,High,2025-08-07T08:30:00-04:00,,,,,221K,218K,America/New_York,Asia/Kolkata
+,President Trump Speaks,USD,Medium,2025-08-07T16:00:00-04:00,,,,,,,America/New_York,Asia/Kolkata
