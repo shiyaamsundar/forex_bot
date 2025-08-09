@@ -34,6 +34,8 @@ HEADERS = {
     'Authorization': f'Bearer {OANDA_API_KEY}'
 }
 
+
+
 def clear_expired_alerts():
     global last_clear_time
     current_time = time.time()
@@ -176,3 +178,88 @@ def check_cpr_engulfing(instrument, timeframe):
     except Exception as e:
         print(f"[{instrument} - {timeframe}] CPR engulfing error: {str(e)}")
         return False
+
+
+def monitor_instrument(instrument, timeframes):
+    """Continuously monitor an instrument for patterns"""
+    while True:
+        try:
+            # Wait until next 30-minute interval
+            wait_seconds = get_next_interval()
+            print(f"Waiting {wait_seconds//60} minutes until next check for {instrument} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            time.sleep(wait_seconds)
+            
+            # Clear expired alerts at the start of each monitoring cycle
+            clear_expired_alerts()
+            
+            for tf in timeframes:
+                signal = check_engulfing(instrument, tf)
+                # cpr_signal = check_cpr_engulfing(instrument, tf)
+                # breakout_signal = check_prev_day_breakout(instrument, tf)
+                if signal or cpr_signal:
+                    #logger.info(signal)
+                    pass
+                time.sleep(1)  # Small delay to avoid hitting rate limits
+            
+        except Exception as e:
+            #logger.error(f"Error in monitoring loop: {str(e)}")
+            print(f"Error occurred, retrying in 5 minutes - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            time.sleep(300)  # Wait 5 minutes before retrying
+
+
+
+def run_flask():
+    app.run(host='0.0.0.0', port=10000)
+
+def keep_server_alive():
+    while True:
+        try:
+            response = requests.get('https://forex-bot-5o8q.onrender.com')
+            if response.status_code == 200:
+                #logger.info(f"Server alive check successful - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                pass
+            else:
+                #logger.error(f"Server alive check failed with status code: {response.status_code}")
+                pass
+        except Exception as e:
+            #logger.error(f"Error keeping server alive: {str(e)}")
+            pass
+        time.sleep(60)
+
+
+def main():
+
+    #test_telegram_bot()
+
+    threading.Thread(target=run_flask, daemon=True).start()
+    threading.Thread(target=keep_server_alive, daemon=True).start()
+
+
+
+
+    # Step 3: Monitor instruments for patterns
+    instrument_timeframes = {
+        "EUR_USD": ["M30"],
+        "XAU_USD": ["H1"],
+        "NZD_USD": ["M30"],
+        "ETH_USDT": ["H1"]
+    }
+
+    for instrument, timeframes in instrument_timeframes.items():
+        threading.Thread(
+            target=monitor_instrument,
+            args=(instrument, timeframes),
+            daemon=True
+        ).start()
+        print(f"Started monitoring {instrument} on timeframes: {', '.join(timeframes)}")
+
+    try:
+        while True:
+            print(f"Bot is alive - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            time.sleep(600)
+    except KeyboardInterrupt:
+        print("Stopped by user.")
+
+
+if __name__ == "__main__":
+    main()

@@ -40,6 +40,7 @@ last_clear_time = time.time()
 today_events = []
 last_fetched_date = None
 breakout_alerts = {}
+TEST_SEND_ALL_EVENTS_NOW = True
 
 HEADERS = {
     'Authorization': f'Bearer {OANDA_API_KEY}'
@@ -398,18 +399,23 @@ def fetch_investing_calendar():
 
     
     # Path to your matching ChromeDriver (v138)
-    #service = Service(r"C:\webdrivers\chromedriver-win64\chromedriver.exe")
-    #service = Service("/usr/local/bin/chromedriver") 
-    options.binary_location = "/usr/bin/chromium"  # <— important
+    #service = Service(r"C:\webdrivers\chromedriver-win64\chromedriver.exe") #'local'
+    #service = Service("/usr/local/bin/chromedriver") #'server'
+    #options.binary_location = "/usr/bin/chromium"  # <— important 'server'
+
+    #local
+    #service = Service(r"C:\webdrivers\chromedriver-win64\chromedriver.exe") #'local'
+
+
+    #server
+    options.binary_location = "/usr/bin/chromium"
+    service = Service("/usr/bin/chromedriver")
 
     # Use the apt-installed chromedriver
-    service = Service("/usr/bin/chromedriver")      # <— important
+    #service = Service("/usr/bin/chromedriver")      # <— important
 
-    driver = webdriver.Chrome(service=service, options=options)
-    # Update this path as needed
-
-    #driver = webdriver.Chrome(service=service, options=options)
-    #driver = webdriver.Chrome(service=Service("/usr/local/bin/chromedriver"), options=options)
+    driver = webdriver.Chrome(service=service, options=options) #'local'
+ 
 
     try:
         print("Opening Investing.com calendar...")
@@ -523,7 +529,7 @@ def is_event_within_30_minutes(time_str):
         print(f"Error checking event time {time_str}: {e}")
         return False
 
-def send_events_to_telegram(df):
+def send_events_to_telegram1(df):
     """Send economic events to Telegram with Indian time and 30-minute filter"""
     print('hellohello')
     if df.empty:
@@ -581,6 +587,106 @@ def send_events_to_telegram(df):
     # Send the message
     print(f"Sending message to Telegram: {message}")
     send_telegram_alert(message)
+
+
+
+def send_events_to_telegram(df):
+    """Send economic events to Telegram.
+       - TEST mode: send ALL events now (grouped by impact, converted to IST)
+       - PROD mode: only send events within next 30 minutes
+    """
+    if df.empty:
+        print("No economic events found.")
+        return
+
+    if TEST_SEND_ALL_EVENTS_NOW:
+        # ---- TEST MODE: dump every row now ----
+        message = "🛠️ <b>TEST MODE: All Economic Events (Today)</b>\n\n"
+
+        # Convert times first
+        events = []
+        for _, row in df.iterrows():
+            events.append({
+                'time': convert_to_indian_time(row.get('time', '')),
+                'currency': row.get('currency', ''),
+                'event': row.get('event', ''),
+                'importance': row.get('importance', 0) or 0
+            })
+
+        # Group by impact
+        impact_groups = {
+            3: ("🔴 <b>High Impact</b>\n", []),
+            2: ("🟡 <b>Medium Impact</b>\n", []),
+            1: ("🟢 <b>Low Impact</b>\n", []),
+            0: ("⚪ <b>Unknown Impact</b>\n", []),
+        }
+
+        for e in events:
+            impact_groups.get(e['importance'], impact_groups[0])[1].append(e)
+
+        any_section = False
+        for key in [3,2,1,0]:
+            header, items = impact_groups[key]
+            if items:
+                any_section = True
+                message += header
+                for it in items:
+                    message += f"• {it['time']} | {it['currency']} | {it['event']}\n"
+                message += "\n"
+
+        if not any_section:
+            message += "No events parsed."
+        print(f"Sending TEST message to Telegram:\n{message}")
+        send_telegram_alert(message)
+        return
+
+    # ---- PROD MODE (original 30-min filter path) ----
+    print(f"Total events found: {len(df)}")
+    upcoming_events = []
+    for _, row in df.iterrows():
+        indian_time = convert_to_indian_time(row['time'])
+        is_within_30 = is_event_within_30_minutes(row['time'])
+        print(f"Event: {row['time']} -> {indian_time} (IST), Within 30min: {is_within_30}")
+        if is_within_30:
+            upcoming_events.append({
+                'time': indian_time,
+                'currency': row['currency'],
+                'event': row['event'],
+                'importance': row['importance']
+            })
+
+    print(f"Events within 30 minutes: {len(upcoming_events)}")
+    if not upcoming_events:
+        print("No events within 30 minutes.")
+        return
+
+    message = "🚨 <b>Upcoming Economic Events (Next 30 mins)</b>\n\n"
+    high_impact = [e for e in upcoming_events if e['importance'] == 3]
+    medium_impact = [e for e in upcoming_events if e['importance'] == 2]
+    low_impact = [e for e in upcoming_events if e['importance'] == 1]
+
+    if high_impact:
+        message += "🔴 <b>High Impact Events:</b>\n"
+        for event in high_impact:
+            message += f"• {event['time']} | {event['currency']} | {event['event']}\n"
+        message += "\n"
+
+    if medium_impact:
+        message += "🟡 <b>Medium Impact Events:</b>\n"
+        for event in medium_impact:
+            message += f"• {event['time']} | {event['currency']} | {event['event']}\n"
+        message += "\n"
+
+    if low_impact:
+        message += "🟢 <b>Low Impact Events:</b>\n"
+        for event in low_impact:
+            message += f"• {event['time']} | {event['currency']} | {event['event']}\n"
+
+    print(f"Sending message to Telegram: {message}")
+    send_telegram_alert(message)
+
+
+
 
 def is_event_n_minutes_ahead(time_str, minutes):
     """Return True if event is ~`minutes` ahead (±60 seconds margin)"""
@@ -857,7 +963,7 @@ def run_flask():
 def keep_server_alive():
     while True:
         try:
-            response = requests.get('https://forex-bot-1-c7bj.onrender.com')
+            response = requests.get('https://forex-bot-1-c7bj.onrender.com/')
             if response.status_code == 200:
                 print(f"Server alive check OK - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
             else:
