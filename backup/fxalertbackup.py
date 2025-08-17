@@ -2,47 +2,27 @@
 import os
 import time
 import threading
-import argparse
-from datetime import datetime, timezone, date
-from typing import Iterable, Optional, List, Dict
-
 import requests
 from dotenv import load_dotenv
 from flask import Flask, jsonify
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Env & globals
-# ──────────────────────────────────────────────────────────────────────────────
+import argparse
+from datetime import datetime, timezone, timedelta, date
+from typing import Iterable, Optional, List, Dict
+
+import requests
+
+# ── ENV ────────────────────────────────────────────────────────────────────────
 load_dotenv()
-OANDA_API_KEY      = os.getenv('OANDA_API_KEY')
-OANDA_ACCOUNT_ID   = os.getenv('OANDA_ACCOUNT_ID')   # unused here, kept for future
-OANDA_URL          = os.getenv('OANDA_URL')          # e.g. https://api-fxpractice.oanda.com/v3
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-TELEGRAM_CHAT_ID   = os.getenv('TELEGRAM_CHAT_ID')
+OANDA_API_KEY     = os.getenv('OANDA_API_KEY')
+OANDA_ACCOUNT_ID  = os.getenv('OANDA_ACCOUNT_ID')  # not used here but kept for future
+OANDA_URL         = os.getenv('OANDA_URL')         # e.g. https://api-fxpractice.oanda.com/v3
+TELEGRAM_BOT_TOKEN= os.getenv('TELEGRAM_BOT_TOKEN')
+TELEGRAM_CHAT_ID  = os.getenv('TELEGRAM_CHAT_ID')
 
 HEADERS = {'Authorization': f'Bearer {OANDA_API_KEY}'}
 
-try:
-    from zoneinfo import ZoneInfo  # Py3.9+
-except Exception:
-    ZoneInfo = None
-
-IST  = ZoneInfo("Asia/Kolkata") if ZoneInfo else None
-NY_TZ = ZoneInfo("America/New_York") if ZoneInfo else None
-
-FF_BASE = "https://nfs.faireconomy.media"
-PERIOD_TO_PATH = {
-    "thisweek": "ff_calendar_thisweek.json",
-    "nextweek": "ff_calendar_nextweek.json",
-    "lastweek": "ff_calendar_lastweek.json",
-}
-VALID_IMPACTS = {"Holiday", "Low", "Medium", "High"}
-
-MORNING_HOUR = int(os.getenv("MORNING_HOUR", "7"))   # IST hour to fetch/send digest
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Flask liveness (Render)
-# ──────────────────────────────────────────────────────────────────────────────
+# ── FLASK LIVENESS ─────────────────────────────────────────────────────────────
 app = Flask(__name__)
 
 @app.route('/')
@@ -54,10 +34,8 @@ def run_flask():
     app.run(host="0.0.0.0", port=port)
 
 def keep_server_alive():
-    """Self-ping to keep logs flowing (won't prevent free-tier sleep)."""
-    url = os.getenv("SELF_URL", "")
-    if not url:
-        return
+    """Optional health ping (use your own Render URL)."""
+    url = os.getenv("SELF_URL", "https://forex-bot-v3wx.onrender.com/")
     while True:
         try:
             r = requests.get(url, timeout=10)
@@ -66,9 +44,7 @@ def keep_server_alive():
             print(f"Alive check error: {e}", flush=True)
         time.sleep(60)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Telegram
-# ──────────────────────────────────────────────────────────────────────────────
+# ── TELEGRAM ───────────────────────────────────────────────────────────────────
 def send_telegram_alert(message: str):
     try:
         if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
@@ -83,9 +59,7 @@ def send_telegram_alert(message: str):
     except Exception as e:
         print(f"Telegram send error: {e}")
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Alert de-dupe
-# ──────────────────────────────────────────────────────────────────────────────
+# ── DEDUP / RATE LIMIT ─────────────────────────────────────────────────────────
 sent_alerts = {}         # key -> last_sent_epoch
 ALERT_EXPIRY = 30 * 60   # 30 minutes
 last_clear_time = time.time()
@@ -102,17 +76,20 @@ def is_alert_sent(instrument, timeframe, pattern_type, level_type=None):
     clear_expired_alerts()
     key = f"{instrument}_{timeframe}_{pattern_type}_{level_type or ''}"
     ts = sent_alerts.get(key)
-    return bool(ts and (time.time() - ts) < ALERT_EXPIRY)
+    if ts and (time.time() - ts) < ALERT_EXPIRY:
+        return True
+    return False
 
 def mark_alert_sent(instrument, timeframe, pattern_type, level_type=None):
     key = f"{instrument}_{timeframe}_{pattern_type}_{level_type or ''}"
     sent_alerts[key] = time.time()
 
-# ──────────────────────────────────────────────────────────────────────────────
-# OANDA candles
-# ──────────────────────────────────────────────────────────────────────────────
+# ── OANDA CANDLES ──────────────────────────────────────────────────────────────
 def get_candles(instrument="EUR_USD", timeframe="H1", count=2):
-    """Return last `count` completed candles as dicts."""
+    """
+    Returns a list of the last `count` COMPLETED candles:
+    [{open, high, low, close, time, complete}, ...]
+    """
     try:
         url = f"{OANDA_URL}/instruments/{instrument}/candles"
         params = {"count": max(count * 3, 10), "granularity": timeframe, "price": "M"}
@@ -126,8 +103,8 @@ def get_candles(instrument="EUR_USD", timeframe="H1", count=2):
             out.append({
                 "open": float(c["mid"]["o"]),
                 "high": float(c["mid"]["h"]),
-                "low":  float(c["mid"]["l"]),
-                "close":float(c["mid"]["c"]),
+                "low": float(c["mid"]["l"]),
+                "close": float(c["mid"]["c"]),
                 "time": c["time"],
                 "complete": c["complete"]
             })
@@ -136,10 +113,9 @@ def get_candles(instrument="EUR_USD", timeframe="H1", count=2):
         print(f"get_candles error {instrument} {timeframe}: {e}")
         return []
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Pattern logic (engulfing / CPR / body breakout)
-# ──────────────────────────────────────────────────────────────────────────────
+# ── PATTERN LOGIC ──────────────────────────────────────────────────────────────
 def is_bullish_engulfing(prev, curr):
+    # Wide/simple definition: current body engulfs previous body and closes above prev open
     return (curr['open'] <= prev['close'] and
             curr['open'] <  prev['open']  and
             curr['close'] > prev['open'])
@@ -155,23 +131,29 @@ def check_engulfing(instrument="EUR_USD", timeframe="M30"):
         return
     prev, curr = candles[-2], candles[-1]
 
-    if is_bullish_engulfing(prev, curr) and not is_alert_sent(instrument, timeframe, "BULLISH"):
-        msg = (f"🚀 <b>BULLISH Engulfing</b>\n\n"
-               f"Pair: {instrument}\nTF: {timeframe}\n"
-               f"Open: {curr['open']:.5f}\nClose: {curr['close']:.5f}\n"
-               f"Time: {datetime.now():%Y-%m-%d %H:%M:%S}")
-        send_telegram_alert(msg)
-        mark_alert_sent(instrument, timeframe, "BULLISH")
+    if is_bullish_engulfing(prev, curr):
+        if not is_alert_sent(instrument, timeframe, "BULLISH"):
+            msg = (f"🚀 <b>BULLISH Engulfing</b>\n\n"
+                   f"Pair: {instrument}\nTF: {timeframe}\n"
+                   f"Open: {curr['open']:.5f}\nClose: {curr['close']:.5f}\n"
+                   f"Time: {datetime.now():%Y-%m-%d %H:%M:%S}")
+            send_telegram_alert(msg)
+            mark_alert_sent(instrument, timeframe, "BULLISH")
 
-    elif is_bearish_engulfing(prev, curr) and not is_alert_sent(instrument, timeframe, "BEARISH"):
-        msg = (f"🔻 <b>BEARISH Engulfing</b>\n\n"
-               f"Pair: {instrument}\nTF: {timeframe}\n"
-               f"Open: {curr['open']:.5f}\nClose: {curr['close']:.5f}\n"
-               f"Time: {datetime.now():%Y-%m-%d %H:%M:%S}")
-        send_telegram_alert(msg)
-        mark_alert_sent(instrument, timeframe, "BEARISH")
+    elif is_bearish_engulfing(prev, curr):
+        if not is_alert_sent(instrument, timeframe, "BEARISH"):
+            msg = (f"🔻 <b>BEARISH Engulfing</b>\n\n"
+                   f"Pair: {instrument}\nTF: {timeframe}\n"
+                   f"Open: {curr['open']:.5f}\nClose: {curr['close']:.5f}\n"
+                   f"Time: {datetime.now():%Y-%m-%d %H:%M:%S}")
+            send_telegram_alert(msg)
+            mark_alert_sent(instrument, timeframe, "BEARISH")
 
 def check_cpr_engulfing(instrument, timeframe):
+    """
+    CPR from previous day: Pivot=(H+L+C)/3, BC=(H+L)/2, TC=2*Pivot-BC
+    Alert when bullish/bearish engulfing happens near TC or BC (±1% of prev day's range, min 10 pips).
+    """
     daily = get_candles(instrument, "D", count=2)
     if len(daily) < 2:
         print(f"[{instrument}] Not enough daily candles for CPR.")
@@ -199,20 +181,26 @@ def check_cpr_engulfing(instrument, timeframe):
     ]
 
     for ck in checks:
-        if ck["engulf"] and ck["near"] and not is_alert_sent(instrument, timeframe, ck["pattern"], ck["level_type"]):
-            msg = (f"{ck['emoji']} <b>{ck['pattern']} Engulfing near CPR {ck['level_type']}</b>\n\n"
-                   f"Pair: {instrument}\nTF: {timeframe}\n"
-                   f"Open: {curr['open']:.5f}\nClose: {curr['close']:.5f}\n"
-                   f"CPR {ck['level_type']}: {ck['level_val']:.5f}\n"
-                   f"Time: {datetime.now():%Y-%m-%d %H:%M:%S}")
-            send_telegram_alert(msg)
-            mark_alert_sent(instrument, timeframe, ck["pattern"], ck["level_type"])
+        if ck["engulf"] and ck["near"]:
+            if not is_alert_sent(instrument, timeframe, ck["pattern"], ck["level_type"]):
+                msg = (f"{ck['emoji']} <b>{ck['pattern']} Engulfing near CPR {ck['level_type']}</b>\n\n"
+                       f"Pair: {instrument}\nTF: {timeframe}\n"
+                       f"Open: {curr['open']:.5f}\nClose: {curr['close']:.5f}\n"
+                       f"CPR {ck['level_type']}: {ck['level_val']:.5f}\n"
+                       f"Time: {datetime.now():%Y-%m-%d %H:%M:%S}")
+                send_telegram_alert(msg)
+                mark_alert_sent(instrument, timeframe, ck["pattern"], ck["level_type"])
             return
 
 # Track daily H/L + one-time alert per day
 breakout_state = {}  # instrument -> {prev_high, prev_low, date, alert_sent}
 
 def check_body_breakout(instrument, timeframe="M30"):
+    """
+    First candle BODY breakout above previous day's HIGH (bullish) or below LOW (bearish).
+    Fires once per day per instrument.
+    """
+    # Ensure state
     today = datetime.now().date()
     if instrument not in breakout_state or breakout_state[instrument]["date"] != today:
         daily = get_candles(instrument, "D", count=2)
@@ -222,7 +210,7 @@ def check_body_breakout(instrument, timeframe="M30"):
         prev = daily[-2]
         breakout_state[instrument] = {
             "prev_high": prev["high"],
-            "prev_low":  prev["low"],
+            "prev_low": prev["low"],
             "date": today,
             "alert_sent": False
         }
@@ -252,9 +240,75 @@ def check_body_breakout(instrument, timeframe="M30"):
         send_telegram_alert(msg)
         st["alert_sent"] = True
 
-# ──────────────────────────────────────────────────────────────────────────────
-# FF calendar: fetch, parse, alert
-# ──────────────────────────────────────────────────────────────────────────────
+# ── SCHEDULING LOOP ────────────────────────────────────────────────────────────
+def get_next_interval():
+    """
+    Seconds until the next 30-min boundary (:00 or :30).
+    If we're exactly on boundary, wait full 30 mins to ensure next candle completes.
+    """
+    now = datetime.now()
+    mins = now.minute
+    secs = now.second
+    mod = mins % 30
+    wait_min = (30 - mod) if mod != 0 else 30
+    wait_sec = wait_min * 60 - secs
+    if wait_sec <= 0:
+        wait_sec = 30 * 60
+    return wait_sec
+
+def pattern_monitor(instrument, timeframes):
+    while True:
+        try:
+            wait_seconds = get_next_interval()
+            print(f"[{instrument}] waiting {wait_seconds//60}m for next check @ {datetime.now():%H:%M:%S}")
+            time.sleep(wait_seconds)
+            clear_expired_alerts()
+            for tf in timeframes:
+                check_engulfing(instrument, tf)
+                check_cpr_engulfing(instrument, tf)
+                check_body_breakout(instrument, tf)
+                time.sleep(1)  # light rate limit
+        except Exception as e:
+            print(f"pattern_monitor error {instrument}: {e}")
+            time.sleep(60)
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+except Exception:
+    ZoneInfo = None
+
+# ── Config ─────────────────────────────────────────────────────────────────────
+IST = ZoneInfo("Asia/Kolkata") if ZoneInfo else None
+FF_BASE = "https://nfs.faireconomy.media"
+PERIOD_TO_PATH = {
+    "thisweek": "ff_calendar_thisweek.json",
+    "nextweek": "ff_calendar_nextweek.json",
+    "lastweek": "ff_calendar_lastweek.json",
+}
+VALID_IMPACTS = {"Holiday", "Low", "Medium", "High"}
+
+# Morning fetch hour in IST (00-23). Override with env MORNING_HOUR.
+MORNING_HOUR = int(os.getenv("MORNING_HOUR", "7"))
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
+
+# ── Telegram ───────────────────────────────────────────────────────────────────
+def send_telegram_alert(message: str):
+    """Uses TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID env vars."""
+    if not message or not message.strip():
+        return
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("[WARN] Telegram env missing; printing message:\n", message)
+        return
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
+        r = requests.post(url, json=payload, timeout=15)
+        r.raise_for_status()
+    except Exception as e:
+        print(f"[Telegram] send error: {e}")
+
+# ── Fetch & filter ─────────────────────────────────────────────────────────────
 def _get(url: str, max_retries: int = 5, timeout: int = 20) -> requests.Response:
     headers = {
         "User-Agent": "Mozilla/5.0 (compatible; FFCalendarFetcher/1.0)",
@@ -298,39 +352,37 @@ def fetch_events(
         out.append(ev)
     return out
 
+# ── Time helpers ───────────────────────────────────────────────────────────────
+def to_ist_from_ts(ts: int) -> datetime:
+    dt_utc = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+    return dt_utc.astimezone(IST) if IST else dt_utc
+
 def parse_event_time_ist(ev: Dict) -> Optional[datetime]:
-    """
-    Prefer 'timestamp' (UTC). If absent, interpret 'date'+'time' in New York time,
-    then convert to IST. Skips 'All Day' rows for alerting.
-    """
     ts = ev.get("timestamp")
     if ts is not None:
-        dt_utc = datetime.fromtimestamp(int(ts), tz=timezone.utc)
-        return dt_utc.astimezone(IST) if IST else dt_utc
-
+        return to_ist_from_ts(int(ts))
     date_s = ev.get("date")
-    time_s = (ev.get("time") or "").strip()
-    if not date_s or ":" not in time_s:
+    time_s = ev.get("time") or ""
+    if not date_s or not time_s or ":" not in time_s:
         return None
     try:
         hh, mm = map(int, time_s.split(":"))
-        if ZoneInfo and NY_TZ and IST:
-            dt_ny = datetime.strptime(date_s, "%Y-%m-%d").replace(hour=hh, minute=mm, tzinfo=NY_TZ)
-            return dt_ny.astimezone(IST)
-        # fallback: naive
-        return datetime.strptime(f"{date_s} {time_s}", "%Y-%m-%d %H:%M")
+        return datetime.strptime(date_s, "%Y-%m-%d").replace(hour=hh, minute=mm, tzinfo=IST)
     except Exception:
         return None
 
 def is_same_ist_day(ev: Dict, ref_date: date) -> bool:
     dt = parse_event_time_ist(ev)
-    return bool(dt and dt.date() == ref_date)
+    if not dt:
+        return False
+    return dt.date() == ref_date
 
 def is_about_n_minutes_ahead(ev_dt: datetime, n: int) -> bool:
     now = datetime.now(IST)
     delta = (ev_dt - now).total_seconds()
     return (n*60 - 60) <= delta <= (n*60 + 60)
 
+# ── Formatting ─────────────────────────────────────────────────────────────────
 def fmt_line(ev: Dict) -> str:
     title = ev.get("title") or ev.get("event") or ""
     country = (ev.get("country") or ev.get("currency") or "").upper()
@@ -364,6 +416,8 @@ def build_morning_digest(events: List[Dict]) -> str:
         return "ℹ️ <b>No events found for today.</b>"
     return "📅 <b>Today's Economic Calendar</b>\n" + "\n".join(lines).strip()
 
+
+# --- NEW: put the FF alert loop into its own function ---
 def ff_alert_loop(period: str, currencies: List[str], impacts: List[str]):
     today_events: List[Dict] = []
     last_fetch_date: Optional[date] = None
@@ -379,18 +433,7 @@ def ff_alert_loop(period: str, currencies: List[str], impacts: List[str]):
             need_fetch = (last_fetch_date != today_ist) and (now_ist.hour >= MORNING_HOUR)
             if need_fetch:
                 weekly = fetch_events(period, currencies or None, impacts or None)
-                print(f"[FF LOOP] fetched weekly: {len(weekly)} events")
-                # peek a few for debugging
-                for ev in weekly[:5]:
-                    dt_ist = parse_event_time_ist(ev)
-                    print(" sample ->", ev.get("title") or ev.get("event"), "|",
-                          ev.get("country") or ev.get("currency"),
-                          "| time:", ev.get("time"), "| date:", ev.get("date"),
-                          "| ts:", ev.get("timestamp"), "| ist:", dt_ist)
-
                 todays = [ev for ev in weekly if is_same_ist_day(ev, today_ist)]
-                print(f"[FF LOOP] today({today_ist}) in IST: {len(todays)} events")
-
                 todays.sort(key=lambda ev: parse_event_time_ist(ev) or datetime.max)
                 today_events = todays
                 last_fetch_date = today_ist
@@ -419,41 +462,11 @@ def ff_alert_loop(period: str, currencies: List[str], impacts: List[str]):
             print(f"[FF LOOP] error: {e}")
             time.sleep(30)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Scheduling loop for chart patterns
-# ──────────────────────────────────────────────────────────────────────────────
-def get_next_interval():
-    """Seconds until next :00/:30 boundary (to check after candle closes)."""
-    now = datetime.now()
-    mins = now.minute
-    secs = now.second
-    mod = mins % 30
-    wait_min = (30 - mod) if mod != 0 else 30
-    wait_sec = wait_min * 60 - secs
-    if wait_sec <= 0:
-        wait_sec = 30 * 60
-    return wait_sec
 
-def pattern_monitor(instrument, timeframes):
-    while True:
-        try:
-            wait_seconds = get_next_interval()
-            print(f"[{instrument}] waiting {wait_seconds//60}m for next check @ {datetime.now():%H:%M:%S}")
-            time.sleep(wait_seconds)
-            clear_expired_alerts()
-            for tf in timeframes:
-                check_engulfing(instrument, tf)
-                check_cpr_engulfing(instrument, tf)
-                check_body_breakout(instrument, tf)
-                time.sleep(1)  # light rate limit
-        except Exception as e:
-            print(f"pattern_monitor error {instrument}: {e}")
-            time.sleep(60)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Main
-# ──────────────────────────────────────────────────────────────────────────────
+# ── MAIN ───────────────────────────────────────────────────────────────────────
 def main():
+    # argparse just for FF filters/period
     ap = argparse.ArgumentParser(description="Bot runner (FF alerts + pattern monitors + liveness)")
     ap.add_argument("--period", default="thisweek", choices=list(PERIOD_TO_PATH.keys()))
     ap.add_argument("--curr", dest="currencies", default="", help="Comma list, e.g. USD,EUR,INR")
@@ -461,20 +474,20 @@ def main():
     args = ap.parse_args()
 
     currencies = [c.strip() for c in args.currencies.split(",") if c.strip()]
-    impacts    = [i.strip() for i in args.impacts.split(",") if i.strip()]
+    impacts = [i.strip() for i in args.impacts.split(",") if i.strip()]
 
-    # liveness
+    # 1) liveness
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=keep_server_alive, daemon=True).start()
 
-    # FF alerts (morning digest + T-30)
+    # 2) FF alerts (morning digest + T-30)
     threading.Thread(
         target=ff_alert_loop,
         args=(args.period, currencies, impacts),
         daemon=True,
     ).start()
 
-    # Pattern monitors (engulfing, CPR, body breakout)
+    # 3) Pattern monitors (engulfing, CPR, body breakout)
     instrument_timeframes = {
         "EUR_USD": ["M30"],
         "XAU_USD": ["H1"],
@@ -485,7 +498,7 @@ def main():
         threading.Thread(target=pattern_monitor, args=(inst, tfs), daemon=True).start()
         print(f"Started monitoring {inst}: {', '.join(tfs)}")
 
-    # keep main alive
+    # 4) keep the main thread alive
     try:
         while True:
             print(f"Bot alive @ {datetime.now():%Y-%m-%d %H:%M:%S}")
