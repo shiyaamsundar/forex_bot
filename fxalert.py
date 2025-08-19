@@ -6,6 +6,8 @@ import argparse
 from datetime import datetime, timezone, date
 from typing import Iterable, Optional, List, Dict, Tuple
 import collections
+from urllib.parse import urljoin
+import random
 
 import requests
 from dotenv import load_dotenv
@@ -54,24 +56,104 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return jsonify({"status": "alive", "message": "Forex Bot is running"})
+    # Keep the root simple but informative
+    return jsonify({
+        "status": "alive",
+        "message": "Forex Bot is running",
+        "now": datetime.now(APP_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
+    })
+@app.route('/healthz')
+def healthz():
+    # Lightweight probe endpoint for uptime monitors
+    return jsonify({
+        "ok": True,
+        "service": "forex-bot",
+        "tz": str(APP_TZ),
+        "epoch": time.time(),
+        "now": datetime.now(APP_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
+    })
+
 
 def run_flask():
     port = int(os.getenv("PORT", "10000"))
     app.run(host="0.0.0.0", port=port)
 
+def _session_with_retries(total=3, backoff_factor=0.5, status_forcelist=(429, 500, 502, 503, 504)):
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+
+    sess = requests.Session()
+    retry = Retry(
+        total=total,
+        read=total,
+        connect=total,
+        status=total,
+        backoff_factor=backoff_factor,
+        status_forcelist=status_forcelist,
+        allowed_methods=frozenset(['HEAD', 'GET', 'OPTIONS'])
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    sess.mount("http://", adapter)
+    sess.mount("https://", adapter)
+    return sess
+
 def keep_server_alive():
-    """Self-ping to keep logs flowing (won't prevent free-tier sleep)."""
-    url = os.getenv("SELF_URL", "")
-    if not url:
+    """
+    Periodically ping the service (and any extra URLs) so Render logs show liveness.
+    Note: self-pings alone may not prevent Free plan sleep; add an external monitor too.
+    Env:
+      - SELF_URL            -> primary URL to ping (e.g., https://your-service.onrender.com/healthz)
+      - KEEPALIVE_URLS      -> optional, comma-separated additional URLs to ping
+      - KEEPALIVE_SECONDS   -> interval between cycles (default 240s)
+      - DISABLE_KEEPALIVE   -> set to '1' to disable this thread
+    """
+    if os.getenv("DISABLE_KEEPALIVE") == "1":
+        print("[keepalive] disabled via DISABLE_KEEPALIVE=1", flush=True)
         return
+
+    base = (os.getenv("SELF_URL") or "").strip()
+    extras = [u.strip() for u in (os.getenv("KEEPALIVE_URLS") or "").split(",") if u.strip()]
+    interval = int(os.getenv("KEEPALIVE_SECONDS", "240"))  # 4 minutes default
+
+    if not base and not extras:
+        print("[keepalive] No SELF_URL/KEEPALIVE_URLS set; keepalive is inert.", flush=True)
+        return
+
+    # If SELF_URL is set but not a specific path, prefer /healthz
+    if base and base.rstrip("/").endswith(".onrender.com"):
+        base = urljoin(base if base.endswith("/") else base + "/", "healthz")
+
+    sess = _session_with_retries()
+
     while True:
         try:
-            r = requests.get(url, timeout=10)
-            print(f"Server alive: {r.status_code} @ {datetime.now(APP_TZ):%Y-%m-%d %H:%M:%S}", flush=True)
+            urls = []
+            if base:
+                urls.append(base)
+            urls.extend(extras)
+
+            for url in urls:
+                start = time.perf_counter()
+                # Try HEAD first; fall back to GET if server doesn’t allow HEAD
+                try:
+                    r = sess.head(url, timeout=10, headers={"User-Agent": "RenderKeepAlive/1.0"})
+                    method = "HEAD"
+                    if r.status_code >= 400 or r.status_code == 405:
+                        raise requests.RequestException(f"HEAD {r.status_code}")
+                except Exception:
+                    r = sess.get(url, timeout=10, headers={"User-Agent": "RenderKeepAlive/1.0"})
+                    method = "GET"
+
+                elapsed = (time.perf_counter() - start) * 1000.0
+                print(f"[keepalive] {method} {url} -> {r.status_code} in {elapsed:.0f} ms @ "
+                      f"{datetime.now(APP_TZ):%Y-%m-%d %H:%M:%S}", flush=True)
+
         except Exception as e:
-            print(f"Alive check error: {e}", flush=True)
-        time.sleep(60)
+            print(f"[keepalive] error: {e}", flush=True)
+
+        # Add a small random jitter (±10%) to avoid synchronized hits
+        jitter = interval * random.uniform(0.9, 1.1)
+        time.sleep(jitter)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Telegram
