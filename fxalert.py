@@ -22,6 +22,7 @@ OANDA_ACCOUNT_ID   = os.getenv('OANDA_ACCOUNT_ID')   # unused here, kept for fut
 OANDA_URL          = os.getenv('OANDA_URL')          # e.g. https://api-fxpractice.oanda.com/v3
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID   = os.getenv('TELEGRAM_CHAT_ID')
+API_URL =   os.getenv('API_URL')
 
 # News refresh/alert config
 REFRESH_MINUTES = int(os.getenv("REFRESH_MINUTES", "30"))  # refetch feed every N minutes
@@ -98,62 +99,17 @@ def _session_with_retries(total=3, backoff_factor=0.5, status_forcelist=(429, 50
     return sess
 
 def keep_server_alive():
-    """
-    Periodically ping the service (and any extra URLs) so Render logs show liveness.
-    Note: self-pings alone may not prevent Free plan sleep; add an external monitor too.
-    Env:
-      - SELF_URL            -> primary URL to ping (e.g., https://your-service.onrender.com/healthz)
-      - KEEPALIVE_URLS      -> optional, comma-separated additional URLs to ping
-      - KEEPALIVE_SECONDS   -> interval between cycles (default 240s)
-      - DISABLE_KEEPALIVE   -> set to '1' to disable this thread
-    """
-    if os.getenv("DISABLE_KEEPALIVE") == "1":
-        print("[keepalive] disabled via DISABLE_KEEPALIVE=1", flush=True)
-        return
-
-    base = (os.getenv("SELF_URL") or "").strip()
-    extras = [u.strip() for u in (os.getenv("KEEPALIVE_URLS") or "").split(",") if u.strip()]
-    interval = int(os.getenv("KEEPALIVE_SECONDS", "240"))  # 4 minutes default
-
-    if not base and not extras:
-        print("[keepalive] No SELF_URL/KEEPALIVE_URLS set; keepalive is inert.", flush=True)
-        return
-
-    # If SELF_URL is set but not a specific path, prefer /healthz
-    if base and base.rstrip("/").endswith(".onrender.com"):
-        base = urljoin(base if base.endswith("/") else base + "/", "healthz")
-
-    sess = _session_with_retries()
-
+    """Self-ping the service every minute to keep it warm."""
     while True:
         try:
-            urls = []
-            if base:
-                urls.append(base)
-            urls.extend(extras)
-
-            for url in urls:
-                start = time.perf_counter()
-                # Try HEAD first; fall back to GET if server doesn’t allow HEAD
-                try:
-                    r = sess.head(url, timeout=10, headers={"User-Agent": "RenderKeepAlive/1.0"})
-                    method = "HEAD"
-                    if r.status_code >= 400 or r.status_code == 405:
-                        raise requests.RequestException(f"HEAD {r.status_code}")
-                except Exception:
-                    r = sess.get(url, timeout=10, headers={"User-Agent": "RenderKeepAlive/1.0"})
-                    method = "GET"
-
-                elapsed = (time.perf_counter() - start) * 1000.0
-                print(f"[keepalive] {method} {url} -> {r.status_code} in {elapsed:.0f} ms @ "
-                      f"{datetime.now(APP_TZ):%Y-%m-%d %H:%M:%S}", flush=True)
-
+            r = requests.get(API_URL, timeout=10)
+            if r.status_code == 200:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Self-ping OK", flush=True)
+            else:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Self-ping non-200: {r.status_code}", flush=True)
         except Exception as e:
-            print(f"[keepalive] error: {e}", flush=True)
-
-        # Add a small random jitter (±10%) to avoid synchronized hits
-        jitter = interval * random.uniform(0.9, 1.1)
-        time.sleep(jitter)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Self-ping error: {e}", flush=True)
+        time.sleep(60)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Telegram
