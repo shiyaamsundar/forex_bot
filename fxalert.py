@@ -4,7 +4,8 @@ import time
 import threading
 import argparse
 from datetime import datetime, timezone, date
-from typing import Iterable, Optional, List, Dict
+from typing import Iterable, Optional, List, Dict, Tuple
+import collections
 
 import requests
 from dotenv import load_dotenv
@@ -20,6 +21,10 @@ OANDA_URL          = os.getenv('OANDA_URL')          # e.g. https://api-fxpracti
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID   = os.getenv('TELEGRAM_CHAT_ID')
 
+# News refresh/alert config
+REFRESH_MINUTES = int(os.getenv("REFRESH_MINUTES", "30"))  # refetch feed every N minutes
+ALERT_LEAD_MIN  = int(os.getenv("ALERT_LEAD_MIN", "30"))   # alert N minutes before event start
+
 HEADERS = {'Authorization': f'Bearer {OANDA_API_KEY}'}
 
 try:
@@ -27,8 +32,12 @@ try:
 except Exception:
     ZoneInfo = None
 
-IST  = ZoneInfo("Asia/Kolkata") if ZoneInfo else None
+IST   = ZoneInfo("Asia/Kolkata") if ZoneInfo else None
 NY_TZ = ZoneInfo("America/New_York") if ZoneInfo else None
+
+# App timezone: prefer IST; fall back to server local tz (always aware)
+APP_TZ = IST or datetime.now().astimezone().tzinfo
+FAR_FUTURE = datetime.max.replace(tzinfo=APP_TZ)
 
 FF_BASE = "https://nfs.faireconomy.media"
 PERIOD_TO_PATH = {
@@ -37,8 +46,6 @@ PERIOD_TO_PATH = {
     "lastweek": "ff_calendar_lastweek.json",
 }
 VALID_IMPACTS = {"Holiday", "Low", "Medium", "High"}
-
-MORNING_HOUR = int(os.getenv("MORNING_HOUR", "7"))   # IST hour to fetch/send digest
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Flask liveness (Render)
@@ -61,7 +68,7 @@ def keep_server_alive():
     while True:
         try:
             r = requests.get(url, timeout=10)
-            print(f"Server alive: {r.status_code} @ {datetime.now():%Y-%m-%d %H:%M:%S}", flush=True)
+            print(f"Server alive: {r.status_code} @ {datetime.now(APP_TZ):%Y-%m-%d %H:%M:%S}", flush=True)
         except Exception as e:
             print(f"Alive check error: {e}", flush=True)
         time.sleep(60)
@@ -84,7 +91,7 @@ def send_telegram_alert(message: str):
         print(f"Telegram send error: {e}")
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Alert de-dupe
+# Alert de-dupe (pattern monitors)
 # ──────────────────────────────────────────────────────────────────────────────
 sent_alerts = {}         # key -> last_sent_epoch
 ALERT_EXPIRY = 30 * 60   # 30 minutes
@@ -96,7 +103,7 @@ def clear_expired_alerts():
     if now - last_clear_time >= ALERT_EXPIRY:
         sent_alerts.clear()
         last_clear_time = now
-        print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Cleared expired alerts")
+        print(f"[{datetime.now(APP_TZ):%Y-%m-%d %H:%M:%S}] Cleared expired alerts")
 
 def is_alert_sent(instrument, timeframe, pattern_type, level_type=None):
     clear_expired_alerts()
@@ -159,7 +166,7 @@ def check_engulfing(instrument="EUR_USD", timeframe="M30"):
         msg = (f"🚀 <b>BULLISH Engulfing</b>\n\n"
                f"Pair: {instrument}\nTF: {timeframe}\n"
                f"Open: {curr['open']:.5f}\nClose: {curr['close']:.5f}\n"
-               f"Time: {datetime.now():%Y-%m-%d %H:%M:%S}")
+               f"Time: {datetime.now(APP_TZ):%Y-%m-%d %H:%M:%S}")
         send_telegram_alert(msg)
         mark_alert_sent(instrument, timeframe, "BULLISH")
 
@@ -167,7 +174,7 @@ def check_engulfing(instrument="EUR_USD", timeframe="M30"):
         msg = (f"🔻 <b>BEARISH Engulfing</b>\n\n"
                f"Pair: {instrument}\nTF: {timeframe}\n"
                f"Open: {curr['open']:.5f}\nClose: {curr['close']:.5f}\n"
-               f"Time: {datetime.now():%Y-%m-%d %H:%M:%S}")
+               f"Time: {datetime.now(APP_TZ):%Y-%m-%d %H:%M:%S}")
         send_telegram_alert(msg)
         mark_alert_sent(instrument, timeframe, "BEARISH")
 
@@ -204,7 +211,7 @@ def check_cpr_engulfing(instrument, timeframe):
                    f"Pair: {instrument}\nTF: {timeframe}\n"
                    f"Open: {curr['open']:.5f}\nClose: {curr['close']:.5f}\n"
                    f"CPR {ck['level_type']}: {ck['level_val']:.5f}\n"
-                   f"Time: {datetime.now():%Y-%m-%d %H:%M:%S}")
+                   f"Time: {datetime.now(APP_TZ):%Y-%m-%d %H:%M:%S}")
             send_telegram_alert(msg)
             mark_alert_sent(instrument, timeframe, ck["pattern"], ck["level_type"])
             return
@@ -213,7 +220,7 @@ def check_cpr_engulfing(instrument, timeframe):
 breakout_state = {}  # instrument -> {prev_high, prev_low, date, alert_sent}
 
 def check_body_breakout(instrument, timeframe="M30"):
-    today = datetime.now().date()
+    today = datetime.now(APP_TZ).date()
     if instrument not in breakout_state or breakout_state[instrument]["date"] != today:
         daily = get_candles(instrument, "D", count=2)
         if len(daily) < 2:
@@ -241,19 +248,19 @@ def check_body_breakout(instrument, timeframe="M30"):
     if body_low > st["prev_high"]:
         msg = (f"🚀 <b>{instrument} Bullish Body Breakout</b>\n\n"
                f"TF: {timeframe}\nOpen: {c['open']:.5f}\nClose: {c['close']:.5f}\n"
-               f"Prev Day High: {st['prev_high']:.5f}\nTime: {datetime.now():%Y-%m-%d %H:%M:%S}")
+               f"Prev Day High: {st['prev_high']:.5f}\nTime: {datetime.now(APP_TZ):%Y-%m-%d %H:%M:%S}")
         send_telegram_alert(msg)
         st["alert_sent"] = True
 
-    elif body_high < st["prev_low"]:
+    elif body_high < st['prev_low']:
         msg = (f"🔻 <b>{instrument} Bearish Body Breakdown</b>\n\n"
                f"TF: {timeframe}\nOpen: {c['open']:.5f}\nClose: {c['close']:.5f}\n"
-               f"Prev Day Low: {st['prev_low']:.5f}\nTime: {datetime.now():%Y-%m-%d %H:%M:%S}")
+               f"Prev Day Low: {st['prev_low']:.5f}\nTime: {datetime.now(APP_TZ):%Y-%m-%d %H:%M:%S}")
         send_telegram_alert(msg)
         st["alert_sent"] = True
 
 # ──────────────────────────────────────────────────────────────────────────────
-# FF calendar: fetch, parse, alert
+# FF calendar (ISO-aware fetch + IST/APP_TZ digest + T-LEAD alerts)
 # ──────────────────────────────────────────────────────────────────────────────
 def _get(url: str, max_retries: int = 5, timeout: int = 20) -> requests.Response:
     headers = {
@@ -298,43 +305,89 @@ def fetch_events(
         out.append(ev)
     return out
 
+def parse_any_date(date_s: str) -> Optional[date]:
+    if not date_s:
+        return None
+    fmts = ["%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%b %d, %Y"]
+    for f in fmts:
+        try:
+            return datetime.strptime(date_s, f).date()
+        except Exception:
+            continue
+    return None
+
 def parse_event_time_ist(ev: Dict) -> Optional[datetime]:
     """
-    Prefer 'timestamp' (UTC). If absent, interpret 'date'+'time' in New York time,
-    then convert to IST. Skips 'All Day' rows for alerting.
+    Return tz-aware datetime in APP_TZ (IST preferred) if event has a precise time.
+    Order:
+      1) 'timestamp' (UTC seconds)
+      2) ISO-8601 in 'date' (e.g., '2025-08-19T08:30:00-04:00' or ...Z)
+      3) 'date' + 'time' (NY local clock like '8:30am', '08:30')
     """
+    # 1) timestamp
     ts = ev.get("timestamp")
-    if ts is not None:
-        dt_utc = datetime.fromtimestamp(int(ts), tz=timezone.utc)
-        return dt_utc.astimezone(IST) if IST else dt_utc
+    if ts not in (None, "", "--"):
+        try:
+            dt_utc = datetime.fromtimestamp(int(float(ts)), tz=timezone.utc)
+            return dt_utc.astimezone(APP_TZ)
+        except Exception:
+            pass
 
-    date_s = ev.get("date")
-    time_s = (ev.get("time") or "").strip()
-    if not date_s or ":" not in time_s:
-        return None
-    try:
-        hh, mm = map(int, time_s.split(":"))
-        if ZoneInfo and NY_TZ and IST:
-            dt_ny = datetime.strptime(date_s, "%Y-%m-%d").replace(hour=hh, minute=mm, tzinfo=NY_TZ)
-            return dt_ny.astimezone(IST)
-        # fallback: naive
-        return datetime.strptime(f"{date_s} {time_s}", "%Y-%m-%d %H:%M")
-    except Exception:
-        return None
+    # 2) ISO-8601 in 'date'
+    date_raw = (ev.get("date") or "").strip()
+    if date_raw:
+        if "T" in date_raw or date_raw.endswith("Z"):
+            try:
+                iso_s = date_raw.replace("Z", "+00:00")
+                dt_iso = datetime.fromisoformat(iso_s)
+                if dt_iso.tzinfo is None:
+                    dt_iso = dt_iso.replace(tzinfo=(NY_TZ or timezone.utc))
+                return dt_iso.astimezone(APP_TZ)
+            except Exception:
+                pass
 
-def is_same_ist_day(ev: Dict, ref_date: date) -> bool:
-    dt = parse_event_time_ist(ev)
-    return bool(dt and dt.date() == ref_date)
+    # 3) 'date' + 'time'
+    time_s = (ev.get("time") or "").strip().lower()
+    if not date_raw or time_s in ("", "all day", "tentative"):
+        return None  # no precise time
 
-def is_about_n_minutes_ahead(ev_dt: datetime, n: int) -> bool:
-    now = datetime.now(IST)
-    delta = (ev_dt - now).total_seconds()
-    return (n*60 - 60) <= delta <= (n*60 + 60)
+    date_formats = ["%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%b %d, %Y"]
+    time_formats = ["%I:%M%p", "%I%p", "%H:%M", "%H"]
+    for df in date_formats:
+        for tf in time_formats:
+            try:
+                base = datetime.strptime(f"{date_raw} {time_s.upper()}", f"{df} {tf}")
+                base = base.replace(tzinfo=(NY_TZ or timezone.utc))
+                return base.astimezone(APP_TZ)
+            except Exception:
+                continue
+    return None
+
+def calc_today_variants_app(now_app: datetime) -> Tuple[date, date, date]:
+    today_app = now_app.date()
+    today_ny  = now_app.astimezone(NY_TZ or timezone.utc).date()
+    today_utc = now_app.astimezone(timezone.utc).date()
+    return today_app, today_ny, today_utc
+
+def event_is_today_any_app(ev: Dict, now_app: datetime) -> bool:
+    """Timed events by parsed APP_TZ dt; otherwise raw-date match vs APP/NY/UTC 'today'."""
+    dt_app = parse_event_time_ist(ev)
+    if dt_app:
+        return dt_app.date() == now_app.date()
+
+    raw = (ev.get("date") or "").strip()
+    if raw and not ("T" in raw or raw.endswith("Z")):
+        ev_date = parse_any_date(raw)
+        if ev_date:
+            t_app, t_ny, t_utc = calc_today_variants_app(now_app)
+            return ev_date in (t_app, t_ny, t_utc)
+    return False
 
 def fmt_line(ev: Dict) -> str:
-    title = ev.get("title") or ev.get("event") or ""
+    title   = ev.get("title") or ev.get("event") or ""
     country = (ev.get("country") or ev.get("currency") or "").upper()
-    impact = (ev.get("impact") or "").capitalize()
+    impact  = (ev.get("impact") or "").capitalize()
+
     when_local = parse_event_time_ist(ev)
     when_str = when_local.strftime("%H:%M") if when_local else (ev.get("time") or "All Day")
 
@@ -344,79 +397,100 @@ def fmt_line(ev: Dict) -> str:
         if v not in (None, "", "--"):
             extras.append(f"{k.capitalize()}: {v}")
     extras_s = " | ".join(extras) if extras else ""
+
     base = f"{when_str} | {country} {impact:<6} | {title}"
     return base + (f"  ({extras_s})" if extras_s else "")
 
 def build_morning_digest(events: List[Dict]) -> str:
-    lines = []
+    if not events:
+        return "ℹ️ <b>No events found for today.</b>"
+    lines = ["📅 <b>Today's Economic Calendar</b>"]
     by_imp_order = ["High", "Medium", "Low", "Holiday"]
+    icons = {"High":"🔴","Medium":"🟡","Low":"🟢","Holiday":"⚪"}
     for imp in by_imp_order:
         bucket = [e for e in events if (e.get("impact") or "").capitalize() == imp]
         if not bucket:
             continue
-        lines.append({"High":"🔴","Medium":"🟡","Low":"🟢","Holiday":"⚪"}.get(imp,"⚪") +
-                     f" <b>{imp} Impact</b>")
-        bucket.sort(key=lambda ev: parse_event_time_ist(ev) or datetime.max)
+        lines.append(f"{icons.get(imp,'⚪')} <b>{imp} Impact</b>")
+        # aware sort key so we never compare naive vs aware
+        bucket.sort(key=lambda ev: (parse_event_time_ist(ev) is None,
+                                    parse_event_time_ist(ev) or FAR_FUTURE))
         for ev in bucket:
             lines.append("• " + fmt_line(ev))
         lines.append("")
-    if not lines:
-        return "ℹ️ <b>No events found for today.</b>"
-    return "📅 <b>Today's Economic Calendar</b>\n" + "\n".join(lines).strip()
+    return "\n".join(lines).strip()
 
-def ff_alert_loop(period: str, currencies: List[str], impacts: List[str]):
+def is_about_n_minutes_ahead_app(ev_dt: datetime, n: int) -> bool:
+    now = datetime.now(APP_TZ)
+    delta = (ev_dt - now).total_seconds()
+    return (n*60 - 60) <= delta <= (n*60 + 60)
+
+def summarize_feed_dates(events: List[Dict]):
+    counter = collections.Counter()
+    for ev in events:
+        d = (ev.get("date") or "").strip()
+        counter[d] += 1
+    print("[NEWS] Raw 'date' values (top 12):")
+    for i, (k, v) in enumerate(counter.most_common(12), 1):
+        print(f"  {i:2d}. {k or '<empty>'}: {v}")
+
+def news_loop(period="thisweek", currencies=None, impacts=None, refresh_minutes=30, alert_lead=30):
     today_events: List[Dict] = []
-    last_fetch_date: Optional[date] = None
-    alerted_keys_30m = set()
+    last_digest_date: Optional[date] = None
+    alerted_keys = set()
+    last_fetch_ts = 0.0
 
-    print(f"[FF LOOP] IST MorningHour={MORNING_HOUR}, filters: curr={currencies or 'ALL'}, impact={impacts or 'ALL'}")
+    print(f"[NEWS] TZ={APP_TZ}, refresh={refresh_minutes} min, lead={alert_lead} min, period={period}, "
+          f"curr={currencies or 'ALL'}, impact={impacts or 'ALL'}")
+
     while True:
         try:
-            now_ist = datetime.now(IST)
-            today_ist = now_ist.date()
+            now_app = datetime.now(APP_TZ)
+            t_app, t_ny, t_utc = calc_today_variants_app(now_app)
 
-            # fetch once each morning (IST)
-            need_fetch = (last_fetch_date != today_ist) and (now_ist.hour >= MORNING_HOUR)
-            if need_fetch:
-                weekly = fetch_events(period, currencies or None, impacts or None)
-                print(f"[FF LOOP] fetched weekly: {len(weekly)} events")
-                # peek a few for debugging
-                for ev in weekly[:5]:
-                    dt_ist = parse_event_time_ist(ev)
-                    print(" sample ->", ev.get("title") or ev.get("event"), "|",
-                          ev.get("country") or ev.get("currency"),
-                          "| time:", ev.get("time"), "| date:", ev.get("date"),
-                          "| ts:", ev.get("timestamp"), "| ist:", dt_ist)
+            # Fetch immediately then every refresh interval
+            if (time.time() - last_fetch_ts) >= (refresh_minutes * 60):
+                weekly = fetch_events(period, currencies, impacts)
+                print(f"[NEWS] fetched weekly: {len(weekly)} @ {now_app:%Y-%m-%d %H:%M:%S}")
+                print(f"[NEWS] Today APP={t_app}, NY={t_ny}, UTC={t_utc}")
+                summarize_feed_dates(weekly)
 
-                todays = [ev for ev in weekly if is_same_ist_day(ev, today_ist)]
-                print(f"[FF LOOP] today({today_ist}) in IST: {len(todays)} events")
+                todays = [ev for ev in weekly if event_is_today_any_app(ev, now_app)]
+                # aware, stable sort key
+                todays.sort(key=lambda ev: (parse_event_time_ist(ev) is None,
+                                            parse_event_time_ist(ev) or FAR_FUTURE))
+                print(f"[NEWS] Picked for today: {len(todays)} events")
 
-                todays.sort(key=lambda ev: parse_event_time_ist(ev) or datetime.max)
                 today_events = todays
-                last_fetch_date = today_ist
-                alerted_keys_30m.clear()
+                last_fetch_ts = time.time()
 
-                # morning digest
-                send_telegram_alert(build_morning_digest(today_events))
-                print(f"[{now_ist:%Y-%m-%d %H:%M}] Morning fetch: {len(today_events)} events")
+                if last_digest_date != t_app:
+                    digest = build_morning_digest(today_events)
+                    send_telegram_alert(digest)
+                    last_digest_date = t_app
+                    alerted_keys.clear()
+                    print(f"[NEWS] Digest sent: {len(today_events)} events")
 
-            # 30-min alerts
+            # T-LEAD alerts for timed events
             if today_events:
+                now_app = datetime.now(APP_TZ)
                 for ev in today_events:
                     ev_dt = parse_event_time_ist(ev)
-                    if not ev_dt or ev_dt < now_ist:
+                    if not ev_dt:
+                        continue  # All Day, etc.
+                    if ev_dt < now_app:
                         continue
-                    key = f"{int(ev.get('timestamp') or ev_dt.timestamp())}-{ev.get('title') or ev.get('event')}"
-                    if key in alerted_keys_30m:
+                    key = f"{int(ev_dt.timestamp())}-{ev.get('title') or ev.get('event')}"
+                    if key in alerted_keys:
                         continue
-                    if is_about_n_minutes_ahead(ev_dt, 30):
-                        send_telegram_alert("⏳ <b>Event in 30 minutes</b>\n\n• " + fmt_line(ev))
-                        alerted_keys_30m.add(key)
+                    if is_about_n_minutes_ahead_app(ev_dt, alert_lead):
+                        send_telegram_alert(f"⏳ <b>Event in {alert_lead} minutes</b>\n\n• " + fmt_line(ev))
+                        alerted_keys.add(key)
 
             time.sleep(60)
 
         except Exception as e:
-            print(f"[FF LOOP] error: {e}")
+            print(f"[NEWS] loop error: {e}")
             time.sleep(30)
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -424,7 +498,7 @@ def ff_alert_loop(period: str, currencies: List[str], impacts: List[str]):
 # ──────────────────────────────────────────────────────────────────────────────
 def get_next_interval():
     """Seconds until next :00/:30 boundary (to check after candle closes)."""
-    now = datetime.now()
+    now = datetime.now(APP_TZ)
     mins = now.minute
     secs = now.second
     mod = mins % 30
@@ -438,7 +512,7 @@ def pattern_monitor(instrument, timeframes):
     while True:
         try:
             wait_seconds = get_next_interval()
-            print(f"[{instrument}] waiting {wait_seconds//60}m for next check @ {datetime.now():%H:%M:%S}")
+            print(f"[{instrument}] waiting {wait_seconds//60}m for next check @ {datetime.now(APP_TZ):%H:%M:%S}")
             time.sleep(wait_seconds)
             clear_expired_alerts()
             for tf in timeframes:
@@ -454,10 +528,12 @@ def pattern_monitor(instrument, timeframes):
 # Main
 # ──────────────────────────────────────────────────────────────────────────────
 def main():
-    ap = argparse.ArgumentParser(description="Bot runner (FF alerts + pattern monitors + liveness)")
+    ap = argparse.ArgumentParser(description="Bot runner (FF news ISO-aware + pattern monitors + liveness)")
     ap.add_argument("--period", default="thisweek", choices=list(PERIOD_TO_PATH.keys()))
     ap.add_argument("--curr", dest="currencies", default="", help="Comma list, e.g. USD,EUR,INR")
     ap.add_argument("--impact", dest="impacts", default="", help="Comma list: High,Medium,Low,Holiday")
+    ap.add_argument("--refresh", type=int, default=REFRESH_MINUTES, help="Minutes between news feed refreshes (ENV REFRESH_MINUTES)")
+    ap.add_argument("--lead", type=int, default=ALERT_LEAD_MIN, help="Minutes before event to alert (ENV ALERT_LEAD_MIN)")
     args = ap.parse_args()
 
     currencies = [c.strip() for c in args.currencies.split(",") if c.strip()]
@@ -467,10 +543,10 @@ def main():
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=keep_server_alive, daemon=True).start()
 
-    # FF alerts (morning digest + T-30)
+    # FF news (digest + T-LEAD alerts)
     threading.Thread(
-        target=ff_alert_loop,
-        args=(args.period, currencies, impacts),
+        target=news_loop,
+        args=(args.period, currencies or None, impacts or None, args.refresh, args.lead),
         daemon=True,
     ).start()
 
@@ -488,7 +564,7 @@ def main():
     # keep main alive
     try:
         while True:
-            print(f"Bot alive @ {datetime.now():%Y-%m-%d %H:%M:%S}")
+            print(f"Bot alive @ {datetime.now(APP_TZ):%Y-%m-%d %H:%M:%S} ({APP_TZ})")
             time.sleep(600)
     except KeyboardInterrupt:
         print("Stopped by user.")
