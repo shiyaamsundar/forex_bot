@@ -652,5 +652,5 @@ def main():
         print("Stopped by user.")
 
 if __name__ == "__main__":
-    test_telegram_bot()
-    #main()
+    #test_telegram_bot()
+    main()
