@@ -153,14 +153,15 @@ def keep_server_alive():
 # ──────────────────────────────────────────────────────────────────────────────
 def send_telegram_alert(message: str):
     try:
-        # allow alerts only between 05:30 and 13:30 IST, regardless of server timezone
-        ist_tz = IST or timezone(timedelta(hours=5, minutes=30))
-        now_ist = datetime.now(ist_tz)
-        start_window = now_ist.replace(hour=5, minute=30, second=0, microsecond=0)
-        end_window = now_ist.replace(hour=13, minute=30, second=0, microsecond=0)
-        if not (start_window <= now_ist <= end_window):
-            print(f"[{now_ist:%Y-%m-%d %H:%M:%S %Z}] Alert suppressed (outside 05:30-13:30 IST window)")
-            return
+        # NOTE: Time-window restriction temporarily disabled; will reintroduce later
+        # # allow alerts only between 05:30 and 13:30 IST, regardless of server timezone
+        # ist_tz = IST or timezone(timedelta(hours=5, minutes=30))
+        # now_ist = datetime.now(ist_tz)
+        # start_window = now_ist.replace(hour=5, minute=30, second=0, microsecond=0)
+        # end_window = now_ist.replace(hour=13, minute=30, second=0, microsecond=0)
+        # if not (start_window <= now_ist <= end_window):
+        #     print(f"[{now_ist:%Y-%m-%d %H:%M:%S %Z}] Alert suppressed (outside 05:30-13:30 IST window)")
+        #     return
         if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
             print("Telegram env not set; printing message:\n", message)
             return
